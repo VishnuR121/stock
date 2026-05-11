@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.env.local
+data/app-data.json
+coverage/
+.vite/
+npm-debug.log*
+*.log
