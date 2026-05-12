@@ -19,11 +19,13 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type {
+  AnalysisRun,
   BrokerAccountSnapshot,
   EnrichedTradePlanResponse,
   HealthStatus,
   OptionIdea,
   PaperOrderRequest,
+  RiskSettings,
   SavedTradePlan,
   SignalSnapshot,
   TradeAction,
@@ -64,11 +66,13 @@ export function App() {
   const [newSymbol, setNewSymbol] = useState("");
   const [snapshots, setSnapshots] = useState<SignalSnapshot[]>([]);
   const [activeSignal, setActiveSignal] = useState<SignalSnapshot | null>(null);
+  const [analysisRuns, setAnalysisRuns] = useState<Record<string, AnalysisRun>>({});
   const [tradePlans, setTradePlans] = useState<Record<string, SavedTradePlan>>({});
   const [journal, setJournal] = useState<TradeJournalEntry[]>([]);
   const [options, setOptions] = useState<OptionIdea[]>([]);
   const [account, setAccount] = useState<BrokerAccountSnapshot | null>(null);
   const [positions, setPositions] = useState<PositionsResponse | null>(null);
+  const [riskSettings, setRiskSettings] = useState<RiskSettings | null>(null);
   const [orderDraft, setOrderDraft] = useState<PaperOrderRequest>(emptyOrder);
   const [reviewingOrder, setReviewingOrder] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -87,6 +91,7 @@ export function App() {
       takeProfitPrice: activeSignal.suggestedTarget ?? draft.takeProfitPrice
     }));
     void loadOptions(activeSignal.symbol);
+    void loadAnalysisHistory(activeSignal.symbol);
   }, [activeSignal]);
 
   const sortedSnapshots = useMemo(() => {
@@ -94,6 +99,7 @@ export function App() {
   }, [snapshots]);
   const activePlanRecord = activeSignal ? tradePlans[activeSignal.symbol] : undefined;
   const activeTradePlan = activePlanRecord?.plan ?? null;
+  const activeAnalysis = activeSignal ? analysisRuns[activeSignal.symbol] : null;
 
   async function refreshBasics() {
     setBusy("refresh");
@@ -105,7 +111,7 @@ export function App() {
       ]);
       setHealth(healthData);
       setWatchlist(watchlistData);
-      await Promise.all([loadAccount(), loadPositions(), loadSavedPlans(), loadJournal()]);
+      await Promise.all([loadAccount(), loadPositions(), loadSavedPlans(), loadJournal(), loadRiskSettings()]);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -142,6 +148,14 @@ export function App() {
       setJournal(await api<TradeJournalEntry[]>("/api/journal"));
     } catch {
       setJournal([]);
+    }
+  }
+
+  async function loadRiskSettings() {
+    try {
+      setRiskSettings(await api<RiskSettings>("/api/settings/risk"));
+    } catch {
+      setRiskSettings(null);
     }
   }
 
@@ -219,6 +233,17 @@ export function App() {
     }
   }
 
+  async function loadAnalysisHistory(symbol: string) {
+    try {
+      const runs = await api<AnalysisRun[]>(`/api/analysis-runs/${symbol}`);
+      if (runs[0]) {
+        setAnalysisRuns((current) => ({ ...current, [symbol]: runs[0] }));
+      }
+    } catch {
+      // Analysis runs are an enhancement; missing history should not block symbol review.
+    }
+  }
+
   async function generateTradePlan() {
     if (!activeSignal) return;
     setBusy("ai");
@@ -234,6 +259,75 @@ export function App() {
           [activeSignal.symbol]: result.savedPlan
         };
       });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function generateAnalysisRun() {
+    if (!activeSignal) return;
+    setBusy("analysis");
+    setMessage(null);
+    try {
+      const result = await api<{ analysisRun: AnalysisRun }>("/api/ai/analysis-run", {
+        method: "POST",
+        body: JSON.stringify({ snapshot: activeSignal, mode: "fast" })
+      });
+      setAnalysisRuns((current) => ({ ...current, [activeSignal.symbol]: result.analysisRun }));
+      setMessage("Decision Center analysis saved.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function setKillSwitch(enabled: boolean) {
+    if (!riskSettings) return;
+    setBusy("risk");
+    setMessage(null);
+    try {
+      const saved = await api<RiskSettings>("/api/settings/risk", {
+        method: "POST",
+        body: JSON.stringify({ ...riskSettings, killSwitchEnabled: enabled })
+      });
+      setRiskSettings(saved);
+      setMessage(enabled ? "Paper order kill switch enabled." : "Paper order kill switch disabled.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function cancelOpenPaperOrders() {
+    setBusy("cancel-orders");
+    setMessage(null);
+    try {
+      await api("/api/alpaca/paper-orders/cancel-open", { method: "POST", body: JSON.stringify({}) });
+      setMessage("Open paper orders canceled.");
+      await loadPositions();
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function flattenPaperPositions() {
+    const confirm = window.prompt("Type FLATTEN PAPER POSITIONS to close all Alpaca paper positions.");
+    if (confirm !== "FLATTEN PAPER POSITIONS") return;
+    setBusy("flatten-positions");
+    setMessage(null);
+    try {
+      await api("/api/alpaca/paper-positions/flatten", {
+        method: "POST",
+        body: JSON.stringify({ confirm })
+      });
+      setMessage("Flatten paper positions request sent.");
+      await Promise.all([loadAccount(), loadPositions()]);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -415,6 +509,10 @@ export function App() {
                   {busy === "ai" ? <Loader2 className="spin" size={17} /> : <Bot size={17} />}
                   <span>{activeSignal && activePlanRecord ? "Refresh plan" : "AI plan"}</span>
                 </button>
+                <button className="textButton secondary" onClick={generateAnalysisRun} disabled={!activeSignal || busy === "analysis"}>
+                  {busy === "analysis" ? <Loader2 className="spin" size={17} /> : <ShieldCheck size={17} />}
+                  <span>Decision Center</span>
+                </button>
               </div>
 
               {activeSignal ? (
@@ -448,6 +546,21 @@ export function App() {
           </section>
 
           <section className="detailGrid">
+            <section className="panel decisionPanel">
+              <div className="panelTitle">
+                <ShieldCheck size={18} />
+                <div>
+                  <h2>Decision Center</h2>
+                  <p>Deterministic reports feed one manager synthesis. Safety blockers win.</p>
+                </div>
+              </div>
+              {activeAnalysis ? (
+                <DecisionCenter analysis={activeAnalysis} />
+              ) : (
+                <EmptyState text="Run Decision Center from an active signal" />
+              )}
+            </section>
+
             <section className="panel">
               <div className="panelTitle">
                 <Bot size={18} />
@@ -490,6 +603,20 @@ export function App() {
               <h2>Trade journal</h2>
             </div>
             <JournalList journal={journal} />
+          </section>
+
+          <section className="panel">
+            <div className="panelTitle spaced">
+              <div>
+                <h2>Safety controls</h2>
+                <p>Paper-only emergency controls and risk lockout.</p>
+              </div>
+              <button className={`textButton ${riskSettings?.killSwitchEnabled ? "danger" : "secondary"}`} onClick={() => setKillSwitch(!riskSettings?.killSwitchEnabled)} disabled={!riskSettings || busy === "risk"}>
+                <ShieldCheck size={16} />
+                <span>{riskSettings?.killSwitchEnabled ? "Disable kill switch" : "Enable kill switch"}</span>
+              </button>
+            </div>
+            <SafetyControls riskSettings={riskSettings} onCancelOrders={cancelOpenPaperOrders} onFlattenPositions={flattenPaperPositions} busy={busy} />
           </section>
         </section>
       </section>
@@ -727,6 +854,112 @@ function PaperOrderForm({
         <span>Review order</span>
       </button>
     </form>
+  );
+}
+
+function DecisionCenter({ analysis }: { analysis: AnalysisRun }) {
+  const hardBlockers = analysis.safetyBlockers.filter((blocker) => blocker.severity === "blocker");
+  return (
+    <article className="decisionCenter">
+      <div className={`verdictCard ${hardBlockers.length ? "danger" : analysis.managerVerdict.bias}`}>
+        <div>
+          <span>Manager verdict</span>
+          <strong>{formatAction(analysis.managerVerdict.action)}</strong>
+        </div>
+        <p>{analysis.managerVerdict.summary}</p>
+        <small>{analysis.managerVerdict.bias} - {analysis.managerVerdict.confidence} confidence</small>
+      </div>
+
+      <SafetyBlockerList blockers={analysis.safetyBlockers} />
+
+      <div className="scenarioGrid">
+        {analysis.managerVerdict.scenarios.map((scenario) => (
+          <article key={scenario.label}>
+            <span>{scenario.label}</span>
+            <p>{scenario.summary}</p>
+            <small>{scenario.trigger}</small>
+          </article>
+        ))}
+      </div>
+
+      <div className="specialistGrid">
+        {analysis.specialistReports.map((report) => (
+          <article key={report.kind} className={`specialistCard ${report.bias}`}>
+            <div>
+              <strong>{report.title}</strong>
+              <span>{report.score}</span>
+            </div>
+            <p>{report.summary}</p>
+            <small>{report.evidence.slice(0, 2).join(" ")}</small>
+            {report.warnings[0] && <em>{report.warnings[0]}</em>}
+          </article>
+        ))}
+      </div>
+
+      <ListBlock title="Entry Requirements" items={analysis.managerVerdict.entryRequirements} />
+      {analysis.managerVerdict.dissent.length > 0 && <ListBlock title="Disagreement" items={analysis.managerVerdict.dissent} />}
+      <p className="invalidation">{analysis.managerVerdict.invalidation}</p>
+    </article>
+  );
+}
+
+function SafetyBlockerList({ blockers }: { blockers: AnalysisRun["safetyBlockers"] }) {
+  if (!blockers.length) return <div className="safetyList clear">No deterministic safety blockers found.</div>;
+
+  return (
+    <div className="safetyList">
+      {blockers.map((blocker) => (
+        <p key={`${blocker.code}-${blocker.message}`} className={blocker.severity}>
+          <AlertTriangle size={15} />
+          <span>{blocker.message}</span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function SafetyControls({
+  riskSettings,
+  onCancelOrders,
+  onFlattenPositions,
+  busy
+}: {
+  riskSettings: RiskSettings | null;
+  onCancelOrders: () => void;
+  onFlattenPositions: () => void;
+  busy: string | null;
+}) {
+  if (!riskSettings) return <EmptyState text="Risk settings unavailable" />;
+
+  return (
+    <div className="safetyControls">
+      <div className="metricGrid">
+        <div>
+          <span>Kill switch</span>
+          <strong>{riskSettings.killSwitchEnabled ? "On" : "Off"}</strong>
+        </div>
+        <div>
+          <span>Max risk</span>
+          <strong>{formatPct(riskSettings.maxRiskPerTradePct)}</strong>
+        </div>
+        <div>
+          <span>Max position</span>
+          <strong>{formatPct(riskSettings.maxPositionPct)}</strong>
+        </div>
+        <div>
+          <span>Min R/R</span>
+          <strong>{riskSettings.minRiskReward}:1</strong>
+        </div>
+      </div>
+      <button className="wideButton danger" onClick={onCancelOrders} disabled={busy === "cancel-orders"}>
+        {busy === "cancel-orders" ? <Loader2 className="spin" size={17} /> : <AlertTriangle size={17} />}
+        <span>Cancel open paper orders</span>
+      </button>
+      <button className="wideButton danger" onClick={onFlattenPositions} disabled={busy === "flatten-positions"}>
+        {busy === "flatten-positions" ? <Loader2 className="spin" size={17} /> : <AlertTriangle size={17} />}
+        <span>Flatten paper positions</span>
+      </button>
+    </div>
   );
 }
 
@@ -1029,6 +1262,10 @@ function formatCurrency(value?: number | null): string {
     currency: "USD",
     maximumFractionDigits: value > 100 ? 0 : 2
   }).format(value);
+}
+
+function formatPct(value: number): string {
+  return `${Math.round(value * 10000) / 100}%`;
 }
 
 function getErrorMessage(error: unknown): string {

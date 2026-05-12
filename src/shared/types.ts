@@ -10,6 +10,9 @@ export type TradeAction =
   | "paper_short_candidate"
   | "options_research_only";
 export type JournalStatus = "watching" | "paper_open" | "paper_closed" | "skipped";
+export type SpecialistKind = "technical" | "market" | "fundamentals" | "options" | "risk" | "journal";
+export type SafetySeverity = "info" | "warning" | "blocker";
+export type AnalysisMode = "fast" | "deep";
 
 export interface WatchlistItem {
   symbol: string;
@@ -59,6 +62,17 @@ export interface RiskProfile {
   maxPositionPct: number;
   maxDailyLossPct: number;
   minRiskReward: number;
+}
+
+export interface RiskSettings {
+  maxRiskPerTradePct: number;
+  maxPositionPct: number;
+  maxDailyLossPct: number;
+  minRiskReward: number;
+  maxDataAgeMinutes: number;
+  priceCollarPct: number;
+  earningsWindowDays: number;
+  killSwitchEnabled: boolean;
 }
 
 export interface TradePlan {
@@ -167,6 +181,66 @@ export interface SavedTradePlan {
   context: TradeContext;
 }
 
+export interface SpecialistReport {
+  kind: SpecialistKind;
+  title: string;
+  score: number;
+  bias: SignalBias;
+  summary: string;
+  evidence: string[];
+  warnings: string[];
+}
+
+export interface SafetyBlocker {
+  code: string;
+  severity: SafetySeverity;
+  message: string;
+}
+
+export interface ManagerScenario {
+  label: "bullish" | "base" | "bearish";
+  summary: string;
+  trigger: string;
+}
+
+export interface ManagerVerdict {
+  symbol: string;
+  action: TradeAction;
+  bias: SignalBias;
+  confidence: "low" | "medium" | "high";
+  summary: string;
+  scenarios: ManagerScenario[];
+  entryRequirements: string[];
+  invalidation: string;
+  dissent: string[];
+  checklist: string[];
+  warnings: string[];
+}
+
+export interface AnalysisRun {
+  id: string;
+  symbol: string;
+  createdAt: string;
+  mode: AnalysisMode;
+  signalAsOf: string;
+  snapshot: SignalSnapshot;
+  context: TradeContext;
+  specialistReports: SpecialistReport[];
+  safetyBlockers: SafetyBlocker[];
+  managerVerdict: ManagerVerdict;
+}
+
+export interface TradingViewSignal {
+  id: string;
+  createdAt: string;
+  symbol: string;
+  alertName?: string;
+  timeframe?: string;
+  message: string;
+  payload: Record<string, unknown>;
+  status: "received" | "analyzed" | "ignored";
+}
+
 export interface TradeJournalEntry {
   id: string;
   symbol: string;
@@ -234,6 +308,9 @@ export interface StoredAppData {
   watchlist: WatchlistItem[];
   tradeNotes: Record<string, string>;
   savedPlans: Record<string, SavedTradePlan>;
+  analysisRuns: Record<string, AnalysisRun[]>;
+  tradingViewSignals: TradingViewSignal[];
+  riskSettings: RiskSettings;
   contextCache: Record<string, TradeContext>;
   journal: TradeJournalEntry[];
   scanHistory: Array<{

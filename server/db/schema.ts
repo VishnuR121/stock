@@ -1,10 +1,13 @@
 import { sql } from "drizzle-orm";
 import { integer, jsonb, numeric, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import type {
+  AnalysisRun,
+  RiskSettings,
   SignalSnapshot,
   TradeAction,
   TradeContext,
   TradeJournalEntry,
+  TradingViewSignal,
   TradePlan,
   WatchlistItem
 } from "../../src/shared/types";
@@ -51,6 +54,27 @@ export const aiPlans = pgTable("ai_plans", {
   score: integer("score").notNull(),
   plan: jsonb("plan").$type<TradePlan>().notNull(),
   context: jsonb("context").$type<TradeContext>().notNull()
+});
+
+export const analysisRuns = pgTable("analysis_runs", {
+  id: text("id").primaryKey(),
+  symbol: text("symbol").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  signalAsOf: timestamp("signal_as_of", { withTimezone: true }).notNull(),
+  run: jsonb("run").$type<AnalysisRun>().notNull()
+});
+
+export const tradingViewSignals = pgTable("tradingview_signals", {
+  id: text("id").primaryKey(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  symbol: text("symbol").notNull(),
+  signal: jsonb("signal").$type<TradingViewSignal>().notNull()
+});
+
+export const appSettings = pgTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").$type<RiskSettings | Record<string, unknown>>().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
 
 export const journalEntries = pgTable("journal_entries", {

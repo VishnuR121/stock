@@ -1,35 +1,52 @@
 import { desc, eq, inArray, sql } from "drizzle-orm";
-import type { SavedTradePlan, StoredAppData, TradeContext, TradeJournalEntry, WatchlistItem } from "../../src/shared/types";
+import type {
+  AnalysisRun,
+  RiskSettings,
+  SavedTradePlan,
+  StoredAppData,
+  TradeContext,
+  TradeJournalEntry,
+  TradingViewSignal,
+  WatchlistItem
+} from "../../src/shared/types";
 import type { AppDb } from "./client";
 import {
   aiPlans,
+  analysisRuns,
+  appSettings,
   contextCache,
   journalEntries,
   scanRuns,
   signalSnapshots,
   tradeNotes,
+  tradingViewSignals,
   watchlistItems,
   watchlistRowToItem
 } from "./schema";
-import { createSeedWatchlist, normalizeData, type AppStore } from "../storage";
+import { createSeedWatchlist, getDefaultRiskSettings, normalizeData, type AppStore } from "../storage";
 
 export class DatabaseStore implements AppStore {
   constructor(private readonly db: AppDb) {}
 
   async read(): Promise<StoredAppData> {
-    const [watchlist, notes, savedPlans, journal, scans, contexts] = await Promise.all([
+    const [watchlist, notes, savedPlans, journal, scans, contexts, settings, signals] = await Promise.all([
       this.getWatchlist(),
       this.getTradeNotes(),
       this.getSavedPlans(),
       this.getJournal(),
       this.getScanHistory(),
-      this.getAllCachedContexts()
+      this.getAllCachedContexts(),
+      this.getRiskSettings(),
+      this.getTradingViewSignals()
     ]);
 
     return {
       watchlist,
       tradeNotes: notes,
       savedPlans,
+      analysisRuns: {},
+      tradingViewSignals: signals,
+      riskSettings: settings,
       contextCache: contexts,
       journal,
       scanHistory: scans
@@ -57,6 +74,18 @@ export class DatabaseStore implements AppStore {
     for (const plan of Object.values(normalized.savedPlans)) {
       await this.upsertSavedPlan(plan);
     }
+
+    for (const runs of Object.values(normalized.analysisRuns)) {
+      for (const run of runs) {
+        await this.saveAnalysisRun(run);
+      }
+    }
+
+    for (const signal of normalized.tradingViewSignals) {
+      await this.saveTradingViewSignal(signal);
+    }
+
+    await this.saveRiskSettings(normalized.riskSettings);
 
     for (const entry of normalized.journal) {
       await this.upsertJournalEntry(entry);
@@ -89,7 +118,17 @@ export class DatabaseStore implements AppStore {
         );
     }
 
-    return this.read();
+    return {
+      watchlist: normalized,
+      tradeNotes: {},
+      savedPlans: {},
+      analysisRuns: {},
+      tradingViewSignals: [],
+      riskSettings: await this.getRiskSettings(),
+      contextCache: {},
+      journal: [],
+      scanHistory: []
+    };
   }
 
   async addScanHistory(symbols: string[], snapshots: StoredAppData["scanHistory"][number]["snapshots"]) {
@@ -145,6 +184,73 @@ export class DatabaseStore implements AppStore {
     }
 
     return plans;
+  }
+
+  async saveAnalysisRun(run: AnalysisRun): Promise<AnalysisRun> {
+    await this.db
+      .insert(analysisRuns)
+      .values({
+        id: run.id,
+        symbol: run.symbol,
+        createdAt: new Date(run.createdAt),
+        signalAsOf: new Date(run.signalAsOf),
+        run
+      })
+      .onConflictDoUpdate({
+        target: analysisRuns.id,
+        set: {
+          run,
+          signalAsOf: new Date(run.signalAsOf)
+        }
+      });
+    return run;
+  }
+
+  async getAnalysisRuns(symbol: string, limit = 10): Promise<AnalysisRun[]> {
+    const rows = await this.db
+      .select()
+      .from(analysisRuns)
+      .where(eq(analysisRuns.symbol, symbol))
+      .orderBy(desc(analysisRuns.createdAt))
+      .limit(limit);
+    return rows.map((row) => row.run);
+  }
+
+  async saveTradingViewSignal(signal: TradingViewSignal): Promise<TradingViewSignal> {
+    await this.db
+      .insert(tradingViewSignals)
+      .values({
+        id: signal.id,
+        createdAt: new Date(signal.createdAt),
+        symbol: signal.symbol,
+        signal
+      })
+      .onConflictDoUpdate({
+        target: tradingViewSignals.id,
+        set: { signal }
+      });
+    return signal;
+  }
+
+  async getTradingViewSignals(limit = 25): Promise<TradingViewSignal[]> {
+    const rows = await this.db.select().from(tradingViewSignals).orderBy(desc(tradingViewSignals.createdAt)).limit(limit);
+    return rows.map((row) => row.signal);
+  }
+
+  async getRiskSettings(): Promise<RiskSettings> {
+    const rows = await this.db.select().from(appSettings).where(eq(appSettings.key, "risk")).limit(1);
+    return { ...getDefaultRiskSettings(), ...((rows[0]?.value as Partial<RiskSettings> | undefined) ?? {}) };
+  }
+
+  async saveRiskSettings(settings: RiskSettings): Promise<RiskSettings> {
+    await this.db
+      .insert(appSettings)
+      .values({ key: "risk", value: settings, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: appSettings.key,
+        set: { value: settings, updatedAt: new Date() }
+      });
+    return settings;
   }
 
   async getCachedContext(symbol: string, maxAgeMs: number): Promise<TradeContext | null> {
@@ -207,12 +313,19 @@ export class DatabaseStore implements AppStore {
     }));
   }
 
-  private async getWatchlist(): Promise<WatchlistItem[]> {
+  async getWatchlist(): Promise<WatchlistItem[]> {
     const rows = await this.db.select().from(watchlistItems).orderBy(watchlistItems.createdAt);
     if (rows.length) return rows.map(watchlistRowToItem);
 
     const seed = createSeedWatchlist();
-    await this.setWatchlist(seed);
+    await this.db.insert(watchlistItems).values(
+      seed.map((item) => ({
+        symbol: item.symbol,
+        notes: item.notes,
+        tags: item.tags,
+        createdAt: new Date(item.createdAt)
+      }))
+    );
     return seed;
   }
 

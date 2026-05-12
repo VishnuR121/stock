@@ -1,10 +1,20 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { SavedTradePlan, StoredAppData, TradeContext, TradeJournalEntry, WatchlistItem } from "../src/shared/types";
+import type {
+  AnalysisRun,
+  RiskSettings,
+  SavedTradePlan,
+  StoredAppData,
+  TradeContext,
+  TradeJournalEntry,
+  TradingViewSignal,
+  WatchlistItem
+} from "../src/shared/types";
 
 export interface AppStore {
   read(): Promise<StoredAppData>;
   write(data: StoredAppData): Promise<void>;
+  getWatchlist(): Promise<WatchlistItem[]>;
   setWatchlist(watchlist: WatchlistItem[]): Promise<StoredAppData>;
   addScanHistory(
     symbols: string[],
@@ -12,6 +22,12 @@ export interface AppStore {
   ): Promise<StoredAppData["scanHistory"][number]>;
   saveTradePlan(plan: Omit<SavedTradePlan, "id" | "createdAt">): Promise<SavedTradePlan>;
   getSavedPlans(): Promise<Record<string, SavedTradePlan>>;
+  saveAnalysisRun(run: AnalysisRun): Promise<AnalysisRun>;
+  getAnalysisRuns(symbol: string, limit?: number): Promise<AnalysisRun[]>;
+  saveTradingViewSignal(signal: TradingViewSignal): Promise<TradingViewSignal>;
+  getTradingViewSignals(limit?: number): Promise<TradingViewSignal[]>;
+  getRiskSettings(): Promise<RiskSettings>;
+  saveRiskSettings(settings: RiskSettings): Promise<RiskSettings>;
   getCachedContext(symbol: string, maxAgeMs: number): Promise<TradeContext | null>;
   saveContext(symbol: string, context: TradeContext): Promise<TradeContext>;
   addJournalEntry(entry: Omit<TradeJournalEntry, "id" | "createdAt" | "updatedAt">): Promise<TradeJournalEntry>;
@@ -29,10 +45,26 @@ const emptyData = (): StoredAppData => ({
   watchlist: createSeedWatchlist(),
   tradeNotes: {},
   savedPlans: {},
+  analysisRuns: {},
+  tradingViewSignals: [],
+  riskSettings: getDefaultRiskSettings(),
   contextCache: {},
   journal: [],
   scanHistory: []
 });
+
+export function getDefaultRiskSettings(): RiskSettings {
+  return {
+    maxRiskPerTradePct: 0.01,
+    maxPositionPct: 0.1,
+    maxDailyLossPct: 0.03,
+    minRiskReward: 1.5,
+    maxDataAgeMinutes: 60 * 24 * 3,
+    priceCollarPct: 0.03,
+    earningsWindowDays: 7,
+    killSwitchEnabled: false
+  };
+}
 
 export class JsonStore implements AppStore {
   constructor(private readonly filePath: string) {}
@@ -53,6 +85,11 @@ export class JsonStore implements AppStore {
   async write(data: StoredAppData): Promise<void> {
     await this.ensureParent();
     await writeFile(this.filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  }
+
+  async getWatchlist(): Promise<WatchlistItem[]> {
+    const data = await this.read();
+    return data.watchlist;
   }
 
   async setWatchlist(watchlist: WatchlistItem[]): Promise<StoredAppData> {
@@ -95,6 +132,43 @@ export class JsonStore implements AppStore {
   async getSavedPlans(): Promise<Record<string, SavedTradePlan>> {
     const data = await this.read();
     return data.savedPlans;
+  }
+
+  async saveAnalysisRun(run: AnalysisRun): Promise<AnalysisRun> {
+    const data = await this.read();
+    data.analysisRuns[run.symbol] = [run, ...(data.analysisRuns[run.symbol] ?? [])].slice(0, 25);
+    await this.write(data);
+    return run;
+  }
+
+  async getAnalysisRuns(symbol: string, limit = 10): Promise<AnalysisRun[]> {
+    const data = await this.read();
+    return (data.analysisRuns[symbol] ?? []).slice(0, limit);
+  }
+
+  async saveTradingViewSignal(signal: TradingViewSignal): Promise<TradingViewSignal> {
+    const data = await this.read();
+    data.tradingViewSignals.unshift(signal);
+    data.tradingViewSignals = data.tradingViewSignals.slice(0, 100);
+    await this.write(data);
+    return signal;
+  }
+
+  async getTradingViewSignals(limit = 25): Promise<TradingViewSignal[]> {
+    const data = await this.read();
+    return data.tradingViewSignals.slice(0, limit);
+  }
+
+  async getRiskSettings(): Promise<RiskSettings> {
+    const data = await this.read();
+    return data.riskSettings;
+  }
+
+  async saveRiskSettings(settings: RiskSettings): Promise<RiskSettings> {
+    const data = await this.read();
+    data.riskSettings = settings;
+    await this.write(data);
+    return settings;
   }
 
   async getCachedContext(symbol: string, maxAgeMs: number): Promise<TradeContext | null> {
@@ -142,6 +216,9 @@ export function normalizeData(raw: Partial<StoredAppData>): StoredAppData {
     watchlist: Array.isArray(raw.watchlist) ? raw.watchlist : createSeedWatchlist(),
     tradeNotes: raw.tradeNotes ?? {},
     savedPlans: raw.savedPlans ?? {},
+    analysisRuns: raw.analysisRuns ?? {},
+    tradingViewSignals: Array.isArray(raw.tradingViewSignals) ? raw.tradingViewSignals : [],
+    riskSettings: { ...getDefaultRiskSettings(), ...(raw.riskSettings ?? {}) },
     contextCache: raw.contextCache ?? {},
     journal: Array.isArray(raw.journal) ? raw.journal : [],
     scanHistory: Array.isArray(raw.scanHistory) ? raw.scanHistory : []

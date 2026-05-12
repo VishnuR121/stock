@@ -24,11 +24,13 @@ This is a research and paper-trading tool. It does not include live-money tradin
    SEC_USER_AGENT=ResearchCopilot/0.1 your-email@example.com
    DATABASE_URL=
    DATA_FILE_PATH=data/app-data.json
+   TRADINGVIEW_WEBHOOK_SECRET=
    PORT=3001
    ```
 
    `ALPHA_VANTAGE_API_KEY` is optional. Without it, AI plans still work but will not include Alpha Vantage earnings, fundamentals, or news context. `SEC_USER_AGENT` is used for free SEC EDGAR requests; set it to something that identifies your local app and contact email.
-   `DATABASE_URL` is optional. If it is empty, the app uses `data/app-data.json`. If it is set to a Postgres/Supabase URL, the Node server stores watchlists, scans, cached AI context, AI plans, and journal entries in Postgres.
+   `DATABASE_URL` is optional. If it is empty, the app uses `data/app-data.json`. If it is set to a Postgres/Supabase URL, the Node server stores watchlists, scans, cached AI context, AI plans, Decision Center analyses, TradingView signals, settings, and journal entries in Postgres.
+   `TRADINGVIEW_WEBHOOK_SECRET` is optional. Set it before using `/api/tradingview/webhook`; TradingView alerts are saved as review-only signals and never place orders directly.
 
 ### Optional Supabase/Postgres Storage
 
@@ -74,8 +76,11 @@ npm run db:studio
 - Paper order route only submits long stock/ETF bracket orders.
 - Stop loss, take profit, paper-only confirmation, risk acceptance, and earnings/event check are required.
 - Options are analyze-only in v1.
+- Decision Center analyses use deterministic specialist reports plus one manager synthesis; hard safety blockers take priority.
+- The kill switch blocks paper order submission while enabled.
+- TradingView webhook alerts are optional signal inputs only; they never submit orders.
 - AI plans can include optional Alpha Vantage context and free SEC EDGAR filings/facts.
-- AI plans, cached API context, scans, and journal entries are saved in Postgres when `DATABASE_URL` is set, otherwise in `data/app-data.json`.
+- AI plans, Decision Center analyses, cached API context, scans, settings, TradingView signals, and journal entries are saved in Postgres when `DATABASE_URL` is set, otherwise in `data/app-data.json`.
 
 ## Verification
 

@@ -3,6 +3,7 @@ dist/
 .env
 .env.local
 data/app-data.json
+data/test-*.json
 coverage/
 .vite/
 npm-debug.log*

@@ -63,12 +63,13 @@ export class AlpacaClient {
 
   async getBars(symbol: string, limit = 260): Promise<Bar[]> {
     const start = new Date();
-    start.setDate(start.getDate() - Math.ceil(limit * 1.8));
+    start.setDate(start.getDate() - Math.ceil(limit * 2.2));
+    const requestLimit = Math.max(limit, Math.ceil(limit * 2.5));
     const params = new URLSearchParams({
       timeframe: "1Day",
       adjustment: "raw",
       feed: "iex",
-      limit: String(limit),
+      limit: String(requestLimit),
       start: start.toISOString()
     });
     const data = await this.marketDataRequest<{ bars?: AlpacaBar[] }>(`/v2/stocks/${symbol}/bars?${params.toString()}`);
@@ -79,7 +80,7 @@ export class AlpacaClient {
       low: bar.l,
       close: bar.c,
       volume: bar.v
-    }));
+    })).slice(-limit);
   }
 
   async getSnapshot(symbol: string): Promise<unknown> {
@@ -122,6 +123,18 @@ export class AlpacaClient {
     return this.tradingRequest("/v2/orders", {
       method: "POST",
       body: JSON.stringify(body)
+    });
+  }
+
+  async cancelOpenOrders(): Promise<unknown> {
+    return this.tradingRequest("/v2/orders", {
+      method: "DELETE"
+    });
+  }
+
+  async closeAllPositions(): Promise<unknown> {
+    return this.tradingRequest("/v2/positions", {
+      method: "DELETE"
     });
   }
 

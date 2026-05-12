@@ -17,6 +17,7 @@ export interface AppConfig {
   secUserAgent: string;
   databaseUrl?: string;
   dataFilePath: string;
+  tradingViewWebhookSecret?: string;
 }
 
 export function getConfig(overrides: Partial<AppConfig> = {}): AppConfig {
@@ -31,6 +32,7 @@ export function getConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     secUserAgent: process.env.SEC_USER_AGENT || "ResearchCopilot/0.1 contact@example.com",
     databaseUrl: process.env.DATABASE_URL,
     dataFilePath: process.env.DATA_FILE_PATH || "data/app-data.json",
+    tradingViewWebhookSecret: process.env.TRADINGVIEW_WEBHOOK_SECRET,
     ...overrides
   };
 }

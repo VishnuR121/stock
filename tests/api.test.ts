@@ -13,6 +13,7 @@ describe("API safety behavior", () => {
       alpacaPaperBaseUrl: "https://api.alpaca.markets",
       alpacaKeyId: "key",
       alpacaSecretKey: "secret",
+      databaseUrl: undefined,
       dataFilePath: "data/test-health.json"
     });
 
@@ -25,6 +26,7 @@ describe("API safety behavior", () => {
       alpacaPaperBaseUrl: "https://api.alpaca.markets",
       alpacaKeyId: "key",
       alpacaSecretKey: "secret",
+      databaseUrl: undefined,
       dataFilePath: "data/test-live-block.json"
     });
 
@@ -36,6 +38,7 @@ describe("API safety behavior", () => {
     const app = createApp({
       alpacaKeyId: undefined,
       alpacaSecretKey: undefined,
+      databaseUrl: undefined,
       dataFilePath: "data/test-missing-creds.json"
     });
 
@@ -69,6 +72,7 @@ describe("API safety behavior", () => {
     const app = createApp({
       alpacaKeyId: "key",
       alpacaSecretKey: "secret",
+      databaseUrl: undefined,
       dataFilePath: "data/test-order-reject.json"
     });
 
@@ -89,6 +93,38 @@ describe("API safety behavior", () => {
 
     expect(response.body.errors.join(" ")).toMatch(/earnings/);
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/v2/orders"), expect.anything());
+  });
+
+  it("requires a TradingView webhook secret", async () => {
+    const app = createApp({
+      dataFilePath: "data/test-tv-no-secret.json",
+      databaseUrl: undefined,
+      tradingViewWebhookSecret: undefined
+    });
+
+    const response = await request(app)
+      .post("/api/tradingview/webhook")
+      .send({ symbol: "SPY", message: "Breakout" })
+      .expect(503);
+
+    expect(response.body.error).toMatch(/secret is not configured/);
+  });
+
+  it("stores authenticated TradingView signals as review-only events", async () => {
+    const app = createApp({
+      dataFilePath: "data/test-tv-secret.json",
+      databaseUrl: undefined,
+      tradingViewWebhookSecret: "test-secret"
+    });
+
+    const response = await request(app)
+      .post("/api/tradingview/webhook")
+      .set("x-tradingview-secret", "test-secret")
+      .send({ symbol: "spy", alertName: "Trend alert", timeframe: "1D", message: "Breakout" })
+      .expect(200);
+
+    expect(response.body.symbol).toBe("SPY");
+    expect(response.body.status).toBe("received");
   });
 });
 
