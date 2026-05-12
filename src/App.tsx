@@ -4,16 +4,19 @@ import {
   BarChart3,
   Bot,
   CheckCircle2,
+  ChevronDown,
   CircleDollarSign,
   ClipboardCheck,
   HelpCircle,
   LineChart,
   Loader2,
+  Moon,
   RefreshCw,
   Save,
   Search,
   Settings,
   ShieldCheck,
+  Sun,
   Target,
   Trash2
 } from "lucide-react";
@@ -47,6 +50,8 @@ type BeginnerAction = {
   why: string;
   options: string;
 };
+type ThemeMode = "light" | "dark";
+type AnalysisView = "decision" | "plan";
 
 const emptyOrder: PaperOrderRequest = {
   symbol: "",
@@ -77,10 +82,21 @@ export function App() {
   const [reviewingOrder, setReviewingOrder] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
+  const [analysisView, setAnalysisView] = useState<AnalysisView>("decision");
 
   useEffect(() => {
     void refreshBasics();
   }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    try {
+      window.localStorage.setItem("stocks-theme", theme);
+    } catch {
+      // Ignore storage failures and keep runtime theme.
+    }
+  }, [theme]);
 
   useEffect(() => {
     if (!activeSignal) return;
@@ -259,6 +275,7 @@ export function App() {
           [activeSignal.symbol]: result.savedPlan
         };
       });
+      setAnalysisView("plan");
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -276,6 +293,7 @@ export function App() {
         body: JSON.stringify({ snapshot: activeSignal, mode: "fast" })
       });
       setAnalysisRuns((current) => ({ ...current, [activeSignal.symbol]: result.analysisRun }));
+      setAnalysisView("decision");
       setMessage("Decision Center analysis saved.");
     } catch (error) {
       setMessage(getErrorMessage(error));
@@ -387,36 +405,19 @@ export function App() {
           <p className="eyebrow">Alpaca paper</p>
           <h1>Research Copilot</h1>
         </div>
-        <button className="iconButton" onClick={refreshBasics} title="Refresh status" aria-label="Refresh status">
-          {busy === "refresh" ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
-        </button>
-      </section>
-
-      <section className="statusGrid">
-        <StatusTile
-          icon={<ShieldCheck size={20} />}
-          label="Broker"
-          value={health?.alpacaConfigured ? "Connected" : "Needs keys"}
-          tone={health?.alpacaConfigured ? "good" : "warn"}
-        />
-        <StatusTile
-          icon={<Bot size={20} />}
-          label="OpenAI"
-          value={health?.openAiConfigured ? health.openAiModel : "Needs key"}
-          tone={health?.openAiConfigured ? "good" : "warn"}
-        />
-        <StatusTile
-          icon={<CircleDollarSign size={20} />}
-          label="Equity"
-          value={formatCurrency(account?.equity)}
-          tone="neutral"
-        />
-        <StatusTile
-          icon={<Activity size={20} />}
-          label="Positions"
-          value={positions ? String(positions.positions.length) : "Offline"}
-          tone={positions ? "neutral" : "warn"}
-        />
+        <div className="topbarActions">
+          <button
+            className="iconButton"
+            onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+          <button className="iconButton" onClick={refreshBasics} title="Refresh status" aria-label="Refresh status">
+            {busy === "refresh" ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
+          </button>
+        </div>
       </section>
 
       {message && (
@@ -427,53 +428,94 @@ export function App() {
       )}
 
       <section className="workspace">
-        <aside className="panel sidebar">
-          <div className="panelTitle">
-            <LineChart size={18} />
-            <h2>Watchlist</h2>
-          </div>
-          <form className="symbolForm" onSubmit={addSymbol}>
-            <input
-              value={newSymbol}
-              onChange={(event) => setNewSymbol(event.target.value)}
-              placeholder="Ticker"
-              aria-label="Ticker"
-            />
-            <button className="iconButton primary" title="Add symbol" aria-label="Add symbol">
-              <Search size={17} />
-            </button>
-          </form>
-          <div className="watchlist">
-            {watchlist.map((item) => (
-              <button
-                className={`watchItem ${activeSignal?.symbol === item.symbol ? "selected" : ""}`}
-                key={item.symbol}
-                onClick={() => loadSymbol(item.symbol)}
-              >
-                <span>{item.symbol}</span>
-                <Trash2
-                  size={15}
-                  role="button"
-                  aria-label={`Remove ${item.symbol}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void saveWatchlist(watchlist.filter((candidate) => candidate.symbol !== item.symbol));
-                  }}
-                />
-              </button>
-            ))}
-          </div>
-          <button className="wideButton" onClick={runScan} disabled={busy === "scan" || watchlist.length === 0}>
-            {busy === "scan" ? <Loader2 className="spin" size={17} /> : <BarChart3 size={17} />}
-            <span>Run scan</span>
-          </button>
-          <div className="sidebarAccount">
+        <aside className="leftRail">
+          <section className="panel compactPanel statusCard">
+            <details className="collapseBlock statusCollapse">
+              <summary>
+                <ShieldCheck size={16} />
+                <span>System status</span>
+                <ChevronDown className="summaryChevron" size={16} />
+              </summary>
+              <div className="collapseBody">
+                <section className="statusGrid">
+                  <StatusTile
+                    icon={<ShieldCheck size={20} />}
+                    label="Broker"
+                    value={health?.alpacaConfigured ? "Connected" : "Needs keys"}
+                    tone={health?.alpacaConfigured ? "good" : "warn"}
+                  />
+                  <StatusTile
+                    icon={<Bot size={20} />}
+                    label="OpenAI"
+                    value={health?.openAiConfigured ? health.openAiModel : "Needs key"}
+                    tone={health?.openAiConfigured ? "good" : "warn"}
+                  />
+                  <StatusTile
+                    icon={<CircleDollarSign size={20} />}
+                    label="Equity"
+                    value={formatCurrency(account?.equity)}
+                    tone="neutral"
+                  />
+                  <StatusTile
+                    icon={<Activity size={20} />}
+                    label="Positions"
+                    value={positions ? String(positions.positions.length) : "Offline"}
+                    tone={positions ? "neutral" : "warn"}
+                  />
+                </section>
+              </div>
+            </details>
+          </section>
+
+          <section className="panel sidebar">
             <div className="panelTitle">
-              <Activity size={18} />
-              <h2>Paper account</h2>
+              <LineChart size={18} />
+              <h2>Watchlist</h2>
             </div>
-            <AccountPanel account={account} positions={positions} />
-          </div>
+            <form className="symbolForm" onSubmit={addSymbol}>
+              <input
+                value={newSymbol}
+                onChange={(event) => setNewSymbol(event.target.value)}
+                placeholder="Ticker"
+                aria-label="Ticker"
+              />
+              <button className="iconButton primary" title="Add symbol" aria-label="Add symbol">
+                <Search size={17} />
+              </button>
+            </form>
+            <div className="watchlist">
+              {watchlist.map((item) => (
+                <button
+                  className={`watchItem ${activeSignal?.symbol === item.symbol ? "selected" : ""}`}
+                  key={item.symbol}
+                  onClick={() => loadSymbol(item.symbol)}
+                >
+                  <span>{item.symbol}</span>
+                  <Trash2
+                    size={15}
+                    role="button"
+                    aria-label={`Remove ${item.symbol}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void saveWatchlist(watchlist.filter((candidate) => candidate.symbol !== item.symbol));
+                    }}
+                  />
+                </button>
+              ))}
+            </div>
+            <button className="wideButton" onClick={runScan} disabled={busy === "scan" || watchlist.length === 0}>
+              {busy === "scan" ? <Loader2 className="spin" size={17} /> : <BarChart3 size={17} />}
+              <span>Run scan</span>
+            </button>
+          </section>
+
+          <section className="panel compactPanel sidebarJournal">
+            <div className="panelTitle">
+              <ClipboardCheck size={18} />
+              <h2>Trade journal</h2>
+            </div>
+            <JournalList journal={journal} />
+          </section>
         </aside>
 
         <section className="mainColumn">
@@ -498,7 +540,7 @@ export function App() {
             </div>
           </section>
 
-          <section className="detailGrid">
+          <section className="focusGrid">
             <section className="panel detailPanel">
               <div className="panelTitle spaced">
                 <div>
@@ -525,98 +567,118 @@ export function App() {
                       <p key={note}>{note}</p>
                     ))}
                   </div>
+
+                  <div className="analysisTabs">
+                    <button
+                      className={`tabButton ${analysisView === "decision" ? "active" : ""}`}
+                      onClick={() => setAnalysisView("decision")}
+                    >
+                      Decision Center
+                    </button>
+                    <button
+                      className={`tabButton ${analysisView === "plan" ? "active" : ""}`}
+                      onClick={() => setAnalysisView("plan")}
+                    >
+                      AI Plan
+                    </button>
+                  </div>
+
+                  {analysisView === "decision" ? (
+                    <section className="analysisSurface">
+                      <div className="panelTitle compact">
+                        <ShieldCheck size={18} />
+                        <p>Deterministic reports feed one manager synthesis. Safety blockers win.</p>
+                      </div>
+                      {activeAnalysis ? (
+                        <DecisionCenter analysis={activeAnalysis} />
+                      ) : (
+                        <EmptyState text="Run Decision Center from an active signal" />
+                      )}
+                    </section>
+                  ) : (
+                    <section className="analysisSurface">
+                      <div className="panelTitle compact">
+                        <Bot size={18} />
+                        <div>
+                          <h2>AI trade plan</h2>
+                          {activePlanRecord && (
+                            <p>
+                              Saved for {activePlanRecord.plan.symbol} at {formatDateTime(activePlanRecord.createdAt)}
+                              {activeSignal && activePlanRecord.signalAsOf !== activeSignal.asOf ? " - scan changed, refresh when ready" : ""}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      {activeTradePlan ? (
+                        <TradePlanView
+                          plan={activeTradePlan}
+                          signal={activeSignal}
+                          savedPlan={activePlanRecord}
+                          onJournal={addJournalFromPlan}
+                          busy={busy === "journal"}
+                        />
+                      ) : (
+                        <EmptyState text="Generate a plan from an active signal" />
+                      )}
+                    </section>
+                  )}
                 </>
               ) : (
                 <EmptyState text="No signal loaded" />
               )}
             </section>
 
-            <section className="panel">
-              <div className="panelTitle">
-                <ClipboardCheck size={18} />
-                <h2>Paper order</h2>
-              </div>
-              <PaperOrderForm
-                activeSignal={activeSignal}
-                orderDraft={orderDraft}
-                setOrderDraft={setOrderDraft}
-                onReview={() => setReviewingOrder(true)}
-              />
-            </section>
-          </section>
-
-          <section className="detailGrid">
-            <section className="panel decisionPanel">
-              <div className="panelTitle">
-                <ShieldCheck size={18} />
-                <div>
-                  <h2>Decision Center</h2>
-                  <p>Deterministic reports feed one manager synthesis. Safety blockers win.</p>
+            <aside className="sideRail">
+              <section className="panel compactPanel">
+                <div className="panelTitle">
+                  <ClipboardCheck size={18} />
+                  <h2>Paper order</h2>
                 </div>
-              </div>
-              {activeAnalysis ? (
-                <DecisionCenter analysis={activeAnalysis} />
-              ) : (
-                <EmptyState text="Run Decision Center from an active signal" />
-              )}
-            </section>
-
-            <section className="panel">
-              <div className="panelTitle">
-                <Bot size={18} />
-                <div>
-                  <h2>AI trade plan</h2>
-                  {activePlanRecord && (
-                    <p>
-                      Saved for {activePlanRecord.plan.symbol} at {formatDateTime(activePlanRecord.createdAt)}
-                      {activeSignal && activePlanRecord.signalAsOf !== activeSignal.asOf ? " - scan changed, refresh when ready" : ""}
-                    </p>
-                  )}
-                </div>
-              </div>
-              {activeTradePlan ? (
-                <TradePlanView
-                  plan={activeTradePlan}
-                  signal={activeSignal}
-                  savedPlan={activePlanRecord}
-                  onJournal={addJournalFromPlan}
-                  busy={busy === "journal"}
+                <PaperOrderForm
+                  activeSignal={activeSignal}
+                  orderDraft={orderDraft}
+                  setOrderDraft={setOrderDraft}
+                  onReview={() => setReviewingOrder(true)}
                 />
-              ) : (
-                <EmptyState text="Generate a plan from an active signal" />
-              )}
-            </section>
+              </section>
 
-            <section className="panel">
-              <div className="panelTitle">
-                <Settings size={18} />
-                <h2>Context + options</h2>
-              </div>
-              <ContextPanel context={activePlanRecord?.context} />
-              <OptionsTable options={options} />
-            </section>
-          </section>
+              <section className="panel compactPanel">
+                <div className="panelTitle spaced">
+                  <div>
+                    <h2>Safety controls</h2>
+                    <p>Paper-only emergency controls and risk lockout.</p>
+                  </div>
+                  <button className={`textButton ${riskSettings?.killSwitchEnabled ? "danger" : "secondary"}`} onClick={() => setKillSwitch(!riskSettings?.killSwitchEnabled)} disabled={!riskSettings || busy === "risk"}>
+                    <ShieldCheck size={16} />
+                    <span>{riskSettings?.killSwitchEnabled ? "Disable kill switch" : "Enable kill switch"}</span>
+                  </button>
+                </div>
+                <SafetyControls riskSettings={riskSettings} onCancelOrders={cancelOpenPaperOrders} onFlattenPositions={flattenPaperPositions} busy={busy} />
+              </section>
 
-          <section className="panel">
-            <div className="panelTitle">
-              <ClipboardCheck size={18} />
-              <h2>Trade journal</h2>
-            </div>
-            <JournalList journal={journal} />
-          </section>
+              <section className="panel compactPanel">
+                <div className="panelTitle">
+                  <Settings size={18} />
+                  <h2>Context + options</h2>
+                </div>
+                <ContextPanel context={activePlanRecord?.context} />
+                <OptionsTable options={options} />
+              </section>
 
-          <section className="panel">
-            <div className="panelTitle spaced">
-              <div>
-                <h2>Safety controls</h2>
-                <p>Paper-only emergency controls and risk lockout.</p>
-              </div>
-              <button className={`textButton ${riskSettings?.killSwitchEnabled ? "danger" : "secondary"}`} onClick={() => setKillSwitch(!riskSettings?.killSwitchEnabled)} disabled={!riskSettings || busy === "risk"}>
-                <ShieldCheck size={16} />
-                <span>{riskSettings?.killSwitchEnabled ? "Disable kill switch" : "Enable kill switch"}</span>
-              </button>
-            </div>
-            <SafetyControls riskSettings={riskSettings} onCancelOrders={cancelOpenPaperOrders} onFlattenPositions={flattenPaperPositions} busy={busy} />
+              <section className="panel compactPanel">
+                <details className="collapseBlock">
+                  <summary>
+                    <Activity size={16} />
+                    <span>Paper account</span>
+                    <ChevronDown className="summaryChevron" size={16} />
+                  </summary>
+                  <div className="collapseBody">
+                    <AccountPanel account={account} positions={positions} />
+                  </div>
+                </details>
+              </section>
+
+            </aside>
           </section>
         </section>
       </section>
@@ -1131,7 +1193,7 @@ function AccountPanel({ account, positions }: { account: BrokerAccountSnapshot |
   if (!account && !positions) return <EmptyState text="Alpaca paper account offline" />;
 
   return (
-    <div className="accountGrid">
+    <div className="accountList">
       <div>
         <span>Cash</span>
         <strong>{formatCurrency(account?.cash)}</strong>
@@ -1295,4 +1357,18 @@ function formatAction(action?: TradeAction): string {
     default:
       return "Watch";
   }
+}
+
+function getInitialTheme(): ThemeMode {
+  if (typeof window === "undefined") return "light";
+  try {
+    const saved = window.localStorage.getItem("stocks-theme");
+    if (saved === "dark" || saved === "light") return saved;
+  } catch {
+    // Ignore storage errors and fall back to system preference.
+  }
+  const prefersDark =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-color-scheme: dark)").matches;
+  return prefersDark ? "dark" : "light";
 }
