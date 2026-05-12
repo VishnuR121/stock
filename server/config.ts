@@ -15,6 +15,7 @@ export interface AppConfig {
   openAiModel: string;
   alphaVantageApiKey?: string;
   secUserAgent: string;
+  databaseUrl?: string;
   dataFilePath: string;
 }
 
@@ -28,6 +29,7 @@ export function getConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     openAiModel: process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
     alphaVantageApiKey: process.env.ALPHA_VANTAGE_API_KEY,
     secUserAgent: process.env.SEC_USER_AGENT || "ResearchCopilot/0.1 contact@example.com",
+    databaseUrl: process.env.DATABASE_URL,
     dataFilePath: process.env.DATA_FILE_PATH || "data/app-data.json",
     ...overrides
   };

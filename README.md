@@ -22,10 +22,39 @@ This is a research and paper-trading tool. It does not include live-money tradin
    OPENAI_MODEL=gpt-5.4-mini
    ALPHA_VANTAGE_API_KEY=
    SEC_USER_AGENT=ResearchCopilot/0.1 your-email@example.com
+   DATABASE_URL=
+   DATA_FILE_PATH=data/app-data.json
    PORT=3001
    ```
 
    `ALPHA_VANTAGE_API_KEY` is optional. Without it, AI plans still work but will not include Alpha Vantage earnings, fundamentals, or news context. `SEC_USER_AGENT` is used for free SEC EDGAR requests; set it to something that identifies your local app and contact email.
+   `DATABASE_URL` is optional. If it is empty, the app uses `data/app-data.json`. If it is set to a Postgres/Supabase URL, the Node server stores watchlists, scans, cached AI context, AI plans, and journal entries in Postgres.
+
+### Optional Supabase/Postgres Storage
+
+Keep the database private on the server. Do not put Supabase keys or database URLs in frontend code.
+
+1. Create a Supabase project.
+2. Copy a Postgres connection string into `.env.local` as `DATABASE_URL`.
+3. Push the schema:
+
+   ```bash
+   npm run db:push
+   ```
+
+4. Import any existing local JSON data:
+
+   ```bash
+   npm run db:import-json
+   ```
+
+Useful database commands:
+
+```bash
+npm run db:generate
+npm run db:push
+npm run db:studio
+```
 
 3. Start the app:
 
@@ -46,7 +75,7 @@ This is a research and paper-trading tool. It does not include live-money tradin
 - Stop loss, take profit, paper-only confirmation, risk acceptance, and earnings/event check are required.
 - Options are analyze-only in v1.
 - AI plans can include optional Alpha Vantage context and free SEC EDGAR filings/facts.
-- AI plans and journal entries are saved in `data/app-data.json`.
+- AI plans, cached API context, scans, and journal entries are saved in Postgres when `DATABASE_URL` is set, otherwise in `data/app-data.json`.
 
 ## Verification
 

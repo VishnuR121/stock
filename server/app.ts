@@ -6,7 +6,8 @@ import { getConfig, isPaperAlpacaUrl, type AppConfig } from "./config";
 import { TradeContextService } from "./context";
 import { buildSignalSnapshot, getDefaultRiskProfile } from "./indicators";
 import { OpenAiTradePlanner } from "./openai";
-import { JsonStore } from "./storage";
+import { createStore, getStoreDescription } from "./storeFactory";
+import type { AppStore } from "./storage";
 import { normalizeSymbol, paperOrderSchema, validatePaperOrder, watchlistItemSchema } from "./validation";
 import type {
   EnrichedTradePlanResponse,
@@ -23,7 +24,7 @@ const CONTEXT_CACHE_MS = 24 * 60 * 60 * 1000;
 
 export function createApp(overrides: Partial<AppConfig> = {}) {
   const config = getConfig(overrides);
-  const store = new JsonStore(config.dataFilePath);
+  const store = createStore(config);
   const alpaca = new AlpacaClient(config);
   const tradePlanner = new OpenAiTradePlanner(config);
   const tradeContext = new TradeContextService(config);
@@ -40,7 +41,8 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       openAiConfigured: tradePlanner.configured,
       openAiModel: config.openAiModel,
       alphaVantageConfigured: Boolean(config.alphaVantageApiKey),
-      dataStore: path.resolve(config.dataFilePath)
+      databaseConfigured: Boolean(config.databaseUrl),
+      dataStore: getStoreDescription(config) === "postgres" ? "postgres" : path.resolve(config.dataFilePath)
     };
     response.json(status);
   });
@@ -249,7 +251,7 @@ async function getReferencePrice(alpaca: AlpacaClient, symbol: string): Promise<
 }
 
 async function getContextForSymbol(
-  store: JsonStore,
+  store: AppStore,
   tradeContext: TradeContextService,
   symbol: string
 ): Promise<TradeContext> {

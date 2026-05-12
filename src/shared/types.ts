@@ -251,5 +251,6 @@ export interface HealthStatus {
   openAiConfigured: boolean;
   openAiModel: string;
   alphaVantageConfigured: boolean;
+  databaseConfigured: boolean;
   dataStore: string;
 }

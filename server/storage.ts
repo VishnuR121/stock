@@ -1,15 +1,32 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { SavedTradePlan, StoredAppData, TradeJournalEntry, WatchlistItem } from "../src/shared/types";
+import type { SavedTradePlan, StoredAppData, TradeContext, TradeJournalEntry, WatchlistItem } from "../src/shared/types";
 
-const seedWatchlist = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA"].map<WatchlistItem>((symbol) => ({
-  symbol,
-  tags: symbol.length === 3 ? ["ETF"] : ["Large cap"],
-  createdAt: new Date().toISOString()
-}));
+export interface AppStore {
+  read(): Promise<StoredAppData>;
+  write(data: StoredAppData): Promise<void>;
+  setWatchlist(watchlist: WatchlistItem[]): Promise<StoredAppData>;
+  addScanHistory(
+    symbols: string[],
+    snapshots: StoredAppData["scanHistory"][number]["snapshots"]
+  ): Promise<StoredAppData["scanHistory"][number]>;
+  saveTradePlan(plan: Omit<SavedTradePlan, "id" | "createdAt">): Promise<SavedTradePlan>;
+  getSavedPlans(): Promise<Record<string, SavedTradePlan>>;
+  getCachedContext(symbol: string, maxAgeMs: number): Promise<TradeContext | null>;
+  saveContext(symbol: string, context: TradeContext): Promise<TradeContext>;
+  addJournalEntry(entry: Omit<TradeJournalEntry, "id" | "createdAt" | "updatedAt">): Promise<TradeJournalEntry>;
+  getJournal(): Promise<TradeJournalEntry[]>;
+}
+
+export const createSeedWatchlist = () =>
+  ["SPY", "QQQ", "AAPL", "MSFT", "NVDA"].map<WatchlistItem>((symbol) => ({
+    symbol,
+    tags: symbol.length === 3 ? ["ETF"] : ["Large cap"],
+    createdAt: new Date().toISOString()
+  }));
 
 const emptyData = (): StoredAppData => ({
-  watchlist: seedWatchlist,
+  watchlist: createSeedWatchlist(),
   tradeNotes: {},
   savedPlans: {},
   contextCache: {},
@@ -17,7 +34,7 @@ const emptyData = (): StoredAppData => ({
   scanHistory: []
 });
 
-export class JsonStore {
+export class JsonStore implements AppStore {
   constructor(private readonly filePath: string) {}
 
   async read(): Promise<StoredAppData> {
@@ -80,7 +97,7 @@ export class JsonStore {
     return data.savedPlans;
   }
 
-  async getCachedContext(symbol: string, maxAgeMs: number) {
+  async getCachedContext(symbol: string, maxAgeMs: number): Promise<TradeContext | null> {
     const data = await this.read();
     const cached = data.contextCache[symbol];
     if (!cached) return null;
@@ -88,7 +105,7 @@ export class JsonStore {
     return age <= maxAgeMs ? cached : null;
   }
 
-  async saveContext(symbol: string, context: StoredAppData["contextCache"][string]) {
+  async saveContext(symbol: string, context: TradeContext): Promise<TradeContext> {
     const data = await this.read();
     data.contextCache[symbol] = context;
     await this.write(data);
@@ -120,9 +137,9 @@ export class JsonStore {
   }
 }
 
-function normalizeData(raw: Partial<StoredAppData>): StoredAppData {
+export function normalizeData(raw: Partial<StoredAppData>): StoredAppData {
   return {
-    watchlist: Array.isArray(raw.watchlist) ? raw.watchlist : seedWatchlist,
+    watchlist: Array.isArray(raw.watchlist) ? raw.watchlist : createSeedWatchlist(),
     tradeNotes: raw.tradeNotes ?? {},
     savedPlans: raw.savedPlans ?? {},
     contextCache: raw.contextCache ?? {},
