@@ -7,6 +7,7 @@ import { getConfig, isPaperAlpacaUrl, type AppConfig } from "./config";
 import { TradeContextService } from "./context";
 import { buildSignalSnapshot, getDefaultRiskProfile } from "./indicators";
 import { OpenAiTradePlanner } from "./openai";
+import { buildOpportunityScan, dateKey } from "./opportunities";
 import { enrichOptionIdeas } from "./options";
 import { createStore, getStoreDescription } from "./storeFactory";
 import type { AppStore } from "./storage";
@@ -91,6 +92,27 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
 
     const scan = await store.addScanHistory(symbols, snapshots);
     response.json({ scan, snapshots });
+  }));
+
+  app.post("/api/opportunities/scan", asyncHandler(async (request, response) => {
+    const forceRefresh = request.body?.forceRefresh === true;
+    const today = dateKey();
+    const cached = await store.getLatestOpportunityScan();
+    if (!forceRefresh && cached?.dateKey === today) {
+      response.json({ scan: cached, cached: true });
+      return;
+    }
+
+    const [account, riskSettings] = await Promise.all([safeAccount(alpaca), store.getRiskSettings()]);
+    const riskProfile = getRiskProfile(account.equity ?? 100000, riskSettings);
+    const limit = optionalNumber(request.body?.limit);
+    const scan = await buildOpportunityScan({
+      riskProfile,
+      riskSettings,
+      limit,
+      getBars: (symbol) => alpaca.getBars(symbol)
+    });
+    response.json({ scan: await store.saveOpportunityScan(scan), cached: false });
   }));
 
   app.get("/api/symbol/:symbol", asyncHandler(async (request, response) => {

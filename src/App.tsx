@@ -26,6 +26,8 @@ import type {
   BrokerAccountSnapshot,
   EnrichedTradePlanResponse,
   HealthStatus,
+  OpportunityCandidate,
+  OpportunityScan,
   OptionIdea,
   PaperOrderRequest,
   RiskSettings,
@@ -74,6 +76,7 @@ export function App() {
   const [analysisRuns, setAnalysisRuns] = useState<Record<string, AnalysisRun>>({});
   const [tradePlans, setTradePlans] = useState<Record<string, SavedTradePlan>>({});
   const [journal, setJournal] = useState<TradeJournalEntry[]>([]);
+  const [opportunityScan, setOpportunityScan] = useState<OpportunityScan | null>(null);
   const [options, setOptions] = useState<OptionIdea[]>([]);
   const [account, setAccount] = useState<BrokerAccountSnapshot | null>(null);
   const [positions, setPositions] = useState<PositionsResponse | null>(null);
@@ -84,6 +87,7 @@ export function App() {
   const [message, setMessage] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
   const [analysisView, setAnalysisView] = useState<AnalysisView>("decision");
+  const [opportunityOpen, setOpportunityOpen] = useState(true);
 
   useEffect(() => {
     void refreshBasics();
@@ -216,6 +220,72 @@ export function App() {
       });
       setSnapshots(result.snapshots);
       setActiveSignal(result.snapshots[0] ?? null);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function findOpportunities(forceRefresh = false) {
+    setBusy(forceRefresh ? "opportunity-refresh" : "opportunity");
+    setMessage(null);
+    try {
+      const result = await api<{ scan: OpportunityScan; cached: boolean }>("/api/opportunities/scan", {
+        method: "POST",
+        body: JSON.stringify({ forceRefresh })
+      });
+      setOpportunityScan(result.scan);
+      setMessage(result.cached ? "Loaded today's cached opportunities." : "Opportunity scan complete.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function analyzeOpportunity(candidate: OpportunityCandidate) {
+    setActiveSignal(candidate.snapshot);
+    setSnapshots((current) => {
+      const without = current.filter((item) => item.symbol !== candidate.symbol);
+      return [candidate.snapshot, ...without];
+    });
+    setAnalysisView("decision");
+    setMessage(`${candidate.symbol} loaded for analysis.`);
+  }
+
+  async function addOpportunityToWatchlist(candidate: OpportunityCandidate) {
+    if (watchlist.some((item) => item.symbol === candidate.symbol)) {
+      setMessage(`${candidate.symbol} is already on the watchlist.`);
+      return;
+    }
+    await saveWatchlist([
+      ...watchlist,
+      {
+        symbol: candidate.symbol,
+        tags: ["Opportunity"],
+        notes: candidate.reason,
+        createdAt: new Date().toISOString()
+      }
+    ]);
+    setMessage(`${candidate.symbol} added to the watchlist.`);
+  }
+
+  async function runOpportunityScan(candidate: OpportunityCandidate) {
+    setBusy(`opportunity-scan-${candidate.symbol}`);
+    setMessage(null);
+    try {
+      const result = await api<{ snapshots: SignalSnapshot[] }>("/api/scan", {
+        method: "POST",
+        body: JSON.stringify({ symbols: [candidate.symbol] })
+      });
+      const next = result.snapshots[0] ?? candidate.snapshot;
+      setSnapshots((current) => {
+        const without = current.filter((item) => item.symbol !== next.symbol);
+        return [next, ...without];
+      });
+      setActiveSignal(next);
+      setMessage(`${candidate.symbol} scan refreshed.`);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -519,6 +589,18 @@ export function App() {
         </aside>
 
         <section className="mainColumn">
+          <OpportunityFinderPanel
+            scan={opportunityScan}
+            busy={busy}
+            open={opportunityOpen}
+            onToggleOpen={() => setOpportunityOpen((current) => !current)}
+            onFind={() => findOpportunities(false)}
+            onRefresh={() => findOpportunities(true)}
+            onAnalyze={analyzeOpportunity}
+            onAddToWatchlist={addOpportunityToWatchlist}
+            onRunScan={runOpportunityScan}
+          />
+
           <section className="panel">
             <div className="panelTitle">
               <Target size={18} />
@@ -736,6 +818,119 @@ function StatusTile({ icon, label, value, tone }: { icon: JSX.Element; label: st
       </div>
     </article>
   );
+}
+
+function OpportunityFinderPanel({
+  scan,
+  busy,
+  open,
+  onToggleOpen,
+  onFind,
+  onRefresh,
+  onAnalyze,
+  onAddToWatchlist,
+  onRunScan
+}: {
+  scan: OpportunityScan | null;
+  busy: string | null;
+  open: boolean;
+  onToggleOpen: () => void;
+  onFind: () => void;
+  onRefresh: () => void;
+  onAnalyze: (candidate: OpportunityCandidate) => void;
+  onAddToWatchlist: (candidate: OpportunityCandidate) => void;
+  onRunScan: (candidate: OpportunityCandidate) => void;
+}) {
+  const loading = busy === "opportunity" || busy === "opportunity-refresh";
+  const candidates = scan?.candidates.slice(0, 8) ?? [];
+
+  return (
+    <section className={`panel opportunityPanel ${open ? "open" : "collapsed"}`} aria-label="Opportunity Finder">
+      <div className="panelTitle spaced opportunityHeader">
+        <div>
+          <h2>Opportunity Finder</h2>
+          <p>{open ? "Daily cached scan of liquid stocks and ETFs. No OpenAI credits used here." : getOpportunitySummary(scan)}</p>
+        </div>
+        <button
+          className="iconButton opportunityToggle"
+          onClick={onToggleOpen}
+          aria-label={open ? "Collapse Opportunity Finder" : "Expand Opportunity Finder"}
+          title={open ? "Collapse Opportunity Finder" : "Expand Opportunity Finder"}
+        >
+          <ChevronDown className="summaryChevron" size={18} />
+        </button>
+      </div>
+
+      {open && (
+        <>
+          <div className="opportunityActions">
+            <button className="textButton" onClick={onFind} disabled={loading}>
+              {busy === "opportunity" ? <Loader2 className="spin" size={17} /> : <Search size={17} />}
+              <span>Find opportunities</span>
+            </button>
+            <button className="textButton secondary" onClick={onRefresh} disabled={loading}>
+              {busy === "opportunity-refresh" ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
+              <span>Refresh today</span>
+            </button>
+          </div>
+
+          {scan ? (
+            <div className="opportunityMeta">
+              <span>Last scanned {formatDateTime(scan.createdAt)}</span>
+              <span>{scan.universe.length} symbols checked</span>
+              {scan.skipped.length > 0 && <span>{scan.skipped.length} skipped</span>}
+            </div>
+          ) : (
+            <div className="opportunityEmpty">Run discovery to get ranked tickers before adding them to your watchlist.</div>
+          )}
+
+          {candidates.length > 0 && (
+            <div className="opportunityGrid">
+              {candidates.map((candidate) => (
+                <article className={`opportunityCard ${candidate.category}`} key={candidate.symbol}>
+                  <div className="opportunityTopline">
+                    <span>#{candidate.rank}</span>
+                    <strong>{candidate.symbol}</strong>
+                    <em>{formatOpportunityCategory(candidate.category)}</em>
+                  </div>
+                  <p>{candidate.reason}</p>
+                  <div className="opportunityStats">
+                    <span>Opp {candidate.opportunityScore}</span>
+                    <span>Risk adj {candidate.riskAdjustedScore}</span>
+                    <span>{formatCurrency(candidate.lastPrice)}</span>
+                    <span>{candidate.riskReward ? `${candidate.riskReward}:1` : "-- R/R"}</span>
+                    <span>{candidate.upsidePct ? `${formatPct(candidate.upsidePct)} room` : "-- room"}</span>
+                  </div>
+                  {candidate.warnings[0] && <small>{candidate.warnings[0]}</small>}
+                  <div className="candidateActions">
+                    <button className="textButton" onClick={() => onAnalyze(candidate)} disabled={Boolean(busy)}>
+                      <Target size={15} />
+                      <span>Analyze</span>
+                    </button>
+                    <button className="textButton secondary" onClick={() => onAddToWatchlist(candidate)} disabled={Boolean(busy)}>
+                      <Save size={15} />
+                      <span>Add</span>
+                    </button>
+                    <button className="textButton ghost" onClick={() => onRunScan(candidate)} disabled={Boolean(busy)}>
+                      {busy === `opportunity-scan-${candidate.symbol}` ? <Loader2 className="spin" size={15} /> : <BarChart3 size={15} />}
+                      <span>Run scan</span>
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function getOpportunitySummary(scan: OpportunityScan | null): string {
+  if (!scan) return "Closed. Expand to find ranked tickers.";
+  const top = scan.candidates[0];
+  if (!top) return `Closed. Last scanned ${formatDateTime(scan.createdAt)}.`;
+  return `Closed. ${scan.candidates.length} ideas from ${formatDateTime(scan.createdAt)}. Top: ${top.symbol} (${formatOpportunityCategory(top.category)}).`;
 }
 
 function SignalCard({
@@ -1390,6 +1585,18 @@ function formatOptionalPct(value?: number | null): string {
 
 function formatNumber(value?: number | null): string {
   return typeof value === "number" && Number.isFinite(value) ? String(value) : "--";
+}
+
+function formatOpportunityCategory(category: OpportunityCandidate["category"]): string {
+  const labels: Record<OpportunityCandidate["category"], string> = {
+    bullish_long: "Bullish long",
+    bearish_short: "Bearish short",
+    bullish_options: "Bullish options",
+    bearish_options: "Bearish options",
+    neutral_income: "Neutral income",
+    watch_only: "Watch only"
+  };
+  return labels[category];
 }
 
 function getErrorMessage(error: unknown): string {

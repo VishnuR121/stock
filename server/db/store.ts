@@ -1,6 +1,7 @@
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import type {
   AnalysisRun,
+  OpportunityScan,
   RiskSettings,
   SavedTradePlan,
   StoredAppData,
@@ -29,7 +30,7 @@ export class DatabaseStore implements AppStore {
   constructor(private readonly db: AppDb) {}
 
   async read(): Promise<StoredAppData> {
-    const [watchlist, notes, savedPlans, journal, scans, contexts, settings, signals] = await Promise.all([
+    const [watchlist, notes, savedPlans, journal, scans, contexts, settings, signals, opportunityScan] = await Promise.all([
       this.getWatchlist(),
       this.getTradeNotes(),
       this.getSavedPlans(),
@@ -37,7 +38,8 @@ export class DatabaseStore implements AppStore {
       this.getScanHistory(),
       this.getAllCachedContexts(),
       this.getRiskSettings(),
-      this.getTradingViewSignals()
+      this.getTradingViewSignals(),
+      this.getLatestOpportunityScan()
     ]);
 
     return {
@@ -49,6 +51,7 @@ export class DatabaseStore implements AppStore {
       riskSettings: settings,
       contextCache: contexts,
       journal,
+      opportunityScans: opportunityScan ? [opportunityScan] : [],
       scanHistory: scans
     };
   }
@@ -91,6 +94,10 @@ export class DatabaseStore implements AppStore {
       await this.upsertJournalEntry(entry);
     }
 
+    if (normalized.opportunityScans[0]) {
+      await this.saveOpportunityScan(normalized.opportunityScans[0]);
+    }
+
     for (const scan of normalized.scanHistory) {
       await this.upsertScanHistory(scan);
     }
@@ -127,6 +134,7 @@ export class DatabaseStore implements AppStore {
       riskSettings: await this.getRiskSettings(),
       contextCache: {},
       journal: [],
+      opportunityScans: [],
       scanHistory: []
     };
   }
@@ -279,6 +287,22 @@ export class DatabaseStore implements AppStore {
         }
       });
     return context;
+  }
+
+  async getLatestOpportunityScan(): Promise<OpportunityScan | null> {
+    const rows = await this.db.select().from(appSettings).where(eq(appSettings.key, "latestOpportunityScan")).limit(1);
+    return (rows[0]?.value as OpportunityScan | undefined) ?? null;
+  }
+
+  async saveOpportunityScan(scan: OpportunityScan): Promise<OpportunityScan> {
+    await this.db
+      .insert(appSettings)
+      .values({ key: "latestOpportunityScan", value: scan, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: appSettings.key,
+        set: { value: scan, updatedAt: new Date() }
+      });
+    return scan;
   }
 
   async addJournalEntry(entry: Omit<TradeJournalEntry, "id" | "createdAt" | "updatedAt">): Promise<TradeJournalEntry> {

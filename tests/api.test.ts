@@ -126,6 +126,49 @@ describe("API safety behavior", () => {
     expect(response.body.symbol).toBe("SPY");
     expect(response.body.status).toBe("received");
   });
+
+  it("scans opportunities with same-day cache and force refresh", async () => {
+    let barRequests = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes("/v2/account")) {
+        return jsonResponse({
+          equity: "100000",
+          cash: "100000",
+          buying_power: "200000",
+          portfolio_value: "100000",
+          status: "ACTIVE",
+          currency: "USD"
+        });
+      }
+      if (target.includes("/v2/stocks/")) {
+        barRequests += 1;
+        if (target.includes("/v2/stocks/SPY/bars")) return jsonResponse({ error: "temporary data gap" }, 500);
+        return jsonResponse({ bars: makeBars() });
+      }
+      return jsonResponse({});
+    });
+
+    const app = createApp({
+      alpacaKeyId: "key",
+      alpacaSecretKey: "secret",
+      databaseUrl: undefined,
+      dataFilePath: `data/test-opportunities-${Date.now()}.json`
+    });
+
+    const first = await request(app).post("/api/opportunities/scan").send({ limit: 3 }).expect(200);
+    expect(first.body.cached).toBe(false);
+    expect(first.body.scan.candidates.length).toBeGreaterThan(0);
+    expect(first.body.scan.skipped[0].symbol).toBe("SPY");
+    expect(barRequests).toBe(3);
+
+    const second = await request(app).post("/api/opportunities/scan").send({ limit: 3 }).expect(200);
+    expect(second.body.cached).toBe(true);
+    expect(barRequests).toBe(3);
+
+    await request(app).post("/api/opportunities/scan").send({ limit: 2, forceRefresh: true }).expect(200);
+    expect(barRequests).toBe(5);
+  });
 });
 
 function jsonResponse(body: unknown, status = 200) {
@@ -137,4 +180,18 @@ function jsonResponse(body: unknown, status = 200) {
       }
     })
   );
+}
+
+function makeBars() {
+  return Array.from({ length: 260 }, (_, index) => {
+    const close = 100 + index * 0.8;
+    return {
+      t: new Date(Date.now() - (260 - index) * 86400000).toISOString(),
+      o: close - 0.5,
+      h: close + 1,
+      l: close - 1,
+      c: close,
+      v: 1000000 + index * 1000
+    };
+  });
 }

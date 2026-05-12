@@ -24,6 +24,13 @@ export type StrategyKind =
   | "cash_secured_put"
   | "watch_only";
 export type StrategySuitability = "candidate" | "watch" | "research" | "avoid";
+export type OpportunityCategory =
+  | "bullish_long"
+  | "bearish_short"
+  | "bullish_options"
+  | "bearish_options"
+  | "neutral_income"
+  | "watch_only";
 
 export interface WatchlistItem {
   symbol: string;
@@ -262,6 +269,38 @@ export interface AnalysisRun {
   managerVerdict: ManagerVerdict;
 }
 
+export interface OpportunityCandidate {
+  symbol: string;
+  rank: number;
+  category: OpportunityCategory;
+  direction: "bullish" | "bearish" | "neutral" | "income";
+  opportunityScore: number;
+  riskAdjustedScore: number;
+  setupScore: number;
+  lastPrice: number | null;
+  riskReward: number | null;
+  upsidePct: number | null;
+  atrPct: number | null;
+  volumeRatio: number | null;
+  trend: TrendState;
+  bias: SignalBias;
+  reason: string;
+  warnings: string[];
+  snapshot: SignalSnapshot;
+}
+
+export interface OpportunityScan {
+  id: string;
+  createdAt: string;
+  dateKey: string;
+  universe: string[];
+  candidates: OpportunityCandidate[];
+  skipped: Array<{
+    symbol: string;
+    reason: string;
+  }>;
+}
+
 export interface TradingViewSignal {
   id: string;
   createdAt: string;
@@ -355,6 +394,7 @@ export interface StoredAppData {
   riskSettings: RiskSettings;
   contextCache: Record<string, TradeContext>;
   journal: TradeJournalEntry[];
+  opportunityScans: OpportunityScan[];
   scanHistory: Array<{
     id: string;
     createdAt: string;

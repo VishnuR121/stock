@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   AnalysisRun,
+  OpportunityScan,
   RiskSettings,
   SavedTradePlan,
   StoredAppData,
@@ -30,6 +31,8 @@ export interface AppStore {
   saveRiskSettings(settings: RiskSettings): Promise<RiskSettings>;
   getCachedContext(symbol: string, maxAgeMs: number): Promise<TradeContext | null>;
   saveContext(symbol: string, context: TradeContext): Promise<TradeContext>;
+  getLatestOpportunityScan(): Promise<OpportunityScan | null>;
+  saveOpportunityScan(scan: OpportunityScan): Promise<OpportunityScan>;
   addJournalEntry(entry: Omit<TradeJournalEntry, "id" | "createdAt" | "updatedAt">): Promise<TradeJournalEntry>;
   getJournal(): Promise<TradeJournalEntry[]>;
 }
@@ -50,6 +53,7 @@ const emptyData = (): StoredAppData => ({
   riskSettings: getDefaultRiskSettings(),
   contextCache: {},
   journal: [],
+  opportunityScans: [],
   scanHistory: []
 });
 
@@ -186,6 +190,18 @@ export class JsonStore implements AppStore {
     return context;
   }
 
+  async getLatestOpportunityScan(): Promise<OpportunityScan | null> {
+    const data = await this.read();
+    return data.opportunityScans[0] ?? null;
+  }
+
+  async saveOpportunityScan(scan: OpportunityScan): Promise<OpportunityScan> {
+    const data = await this.read();
+    data.opportunityScans = [scan, ...data.opportunityScans.filter((item) => item.id !== scan.id)].slice(0, 10);
+    await this.write(data);
+    return scan;
+  }
+
   async addJournalEntry(entry: Omit<TradeJournalEntry, "id" | "createdAt" | "updatedAt">): Promise<TradeJournalEntry> {
     const data = await this.read();
     const now = new Date().toISOString();
@@ -221,6 +237,7 @@ export function normalizeData(raw: Partial<StoredAppData>): StoredAppData {
     riskSettings: { ...getDefaultRiskSettings(), ...(raw.riskSettings ?? {}) },
     contextCache: raw.contextCache ?? {},
     journal: Array.isArray(raw.journal) ? raw.journal : [],
+    opportunityScans: Array.isArray(raw.opportunityScans) ? raw.opportunityScans : [],
     scanHistory: Array.isArray(raw.scanHistory) ? raw.scanHistory : []
   };
 }
