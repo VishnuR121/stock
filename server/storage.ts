@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
+  AlgoTradeProposal,
   AnalysisRun,
   OpportunityScan,
   RiskSettings,
@@ -33,6 +34,9 @@ export interface AppStore {
   saveContext(symbol: string, context: TradeContext): Promise<TradeContext>;
   getLatestOpportunityScan(): Promise<OpportunityScan | null>;
   saveOpportunityScan(scan: OpportunityScan): Promise<OpportunityScan>;
+  getAlgoTradeProposals(limit?: number): Promise<AlgoTradeProposal[]>;
+  saveAlgoTradeProposals(proposals: AlgoTradeProposal[]): Promise<AlgoTradeProposal[]>;
+  updateAlgoTradeProposal(id: string, patch: Partial<AlgoTradeProposal>): Promise<AlgoTradeProposal>;
   addJournalEntry(entry: Omit<TradeJournalEntry, "id" | "createdAt" | "updatedAt">): Promise<TradeJournalEntry>;
   getJournal(): Promise<TradeJournalEntry[]>;
 }
@@ -53,6 +57,7 @@ const emptyData = (): StoredAppData => ({
   riskSettings: getDefaultRiskSettings(),
   contextCache: {},
   journal: [],
+  algoTradeProposals: [],
   opportunityScans: [],
   scanHistory: []
 });
@@ -202,6 +207,34 @@ export class JsonStore implements AppStore {
     return scan;
   }
 
+  async getAlgoTradeProposals(limit = 50): Promise<AlgoTradeProposal[]> {
+    const data = await this.read();
+    return data.algoTradeProposals.slice(0, limit);
+  }
+
+  async saveAlgoTradeProposals(proposals: AlgoTradeProposal[]): Promise<AlgoTradeProposal[]> {
+    const data = await this.read();
+    const ids = new Set(proposals.map((proposal) => proposal.id));
+    data.algoTradeProposals = [...proposals, ...data.algoTradeProposals.filter((proposal) => !ids.has(proposal.id))].slice(0, 100);
+    await this.write(data);
+    return proposals;
+  }
+
+  async updateAlgoTradeProposal(id: string, patch: Partial<AlgoTradeProposal>): Promise<AlgoTradeProposal> {
+    const data = await this.read();
+    const index = data.algoTradeProposals.findIndex((proposal) => proposal.id === id);
+    if (index === -1) throw new Error("Algo trade proposal not found.");
+    const next: AlgoTradeProposal = {
+      ...data.algoTradeProposals[index],
+      ...patch,
+      id,
+      updatedAt: new Date().toISOString()
+    };
+    data.algoTradeProposals[index] = next;
+    await this.write(data);
+    return next;
+  }
+
   async addJournalEntry(entry: Omit<TradeJournalEntry, "id" | "createdAt" | "updatedAt">): Promise<TradeJournalEntry> {
     const data = await this.read();
     const now = new Date().toISOString();
@@ -237,6 +270,7 @@ export function normalizeData(raw: Partial<StoredAppData>): StoredAppData {
     riskSettings: { ...getDefaultRiskSettings(), ...(raw.riskSettings ?? {}) },
     contextCache: raw.contextCache ?? {},
     journal: Array.isArray(raw.journal) ? raw.journal : [],
+    algoTradeProposals: Array.isArray(raw.algoTradeProposals) ? raw.algoTradeProposals : [],
     opportunityScans: Array.isArray(raw.opportunityScans) ? raw.opportunityScans : [],
     scanHistory: Array.isArray(raw.scanHistory) ? raw.scanHistory : []
   };

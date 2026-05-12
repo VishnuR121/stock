@@ -2,6 +2,7 @@ import cors from "cors";
 import express, { type Request, type Response } from "express";
 import path from "node:path";
 import { AlpacaClient } from "./alpaca";
+import { buildAlgoTradeProposals } from "./algo";
 import { buildAnalysisRun, buildFallbackManagerVerdict, buildSafetyBlockers, buildSpecialistReports } from "./analysis";
 import { createTradePlanner } from "./ai";
 import { getConfig, isPaperAlpacaUrl, type AppConfig } from "./config";
@@ -9,14 +10,17 @@ import { TradeContextService } from "./context";
 import { buildSignalSnapshot, getDefaultRiskProfile } from "./indicators";
 import { buildOpportunityScan, dateKey } from "./opportunities";
 import { enrichOptionIdeas } from "./options";
+import { buildPositionMonitorSnapshot } from "./positionMonitor";
 import { createStore, getStoreDescription } from "./storeFactory";
 import type { AppStore } from "./storage";
 import { normalizeSymbol, paperOrderSchema, validatePaperOrder, watchlistItemSchema } from "./validation";
 import type {
   EnrichedTradePlanResponse,
+  AlgoTradeProposal,
   HealthStatus,
   JournalStatus,
   PaperOrderRequest,
+  PaperOrderValidationResult,
   AnalysisMode,
   RiskSettings,
   SignalSnapshot,
@@ -35,6 +39,49 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
   const tradePlanner = createTradePlanner(config);
   const tradeContext = new TradeContextService(config);
   const app = express();
+
+  const createAnalysisFromSnapshot = async (rawSnapshot: SignalSnapshot, mode: AnalysisMode, notes?: unknown) => {
+    const symbol = normalizeSymbol(rawSnapshot.symbol);
+    const [context, options, account, positionsResponse, journal, riskSettings, marketSnapshots] = await Promise.all([
+      getContextForSymbol(store, tradeContext, symbol),
+      alpaca.getOptionIdeas(symbol).catch(() => []),
+      safeAccount(alpaca),
+      safePositions(alpaca),
+      store.getJournal(),
+      store.getRiskSettings(),
+      getMarketSnapshots(alpaca, store)
+    ]);
+
+    const analysisInput = {
+      mode,
+      snapshot: { ...rawSnapshot, symbol },
+      context,
+      options,
+      account,
+      positions: positionsResponse.positions,
+      journal,
+      riskSettings,
+      marketSnapshots
+    };
+    const specialistReports = buildSpecialistReports(analysisInput);
+    const safetyBlockers = buildSafetyBlockers(analysisInput);
+    let managerVerdict = buildFallbackManagerVerdict(analysisInput.snapshot, specialistReports, safetyBlockers);
+
+    if (tradePlanner.configured) {
+      managerVerdict = await tradePlanner.createManagerVerdict({
+        snapshot: analysisInput.snapshot,
+        context,
+        specialistReports,
+        safetyBlockers,
+        userNotes: optionalString(notes)
+      });
+      managerVerdict = enforceSafetyOnVerdict(managerVerdict, safetyBlockers);
+    }
+
+    const analysisRun = buildAnalysisRun({ ...analysisInput, managerVerdict });
+    await store.saveAnalysisRun(analysisRun);
+    return { analysisRun, account, riskSettings };
+  };
 
   app.use(cors());
   app.use(express.json({ limit: "1mb" }));
@@ -173,46 +220,129 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
     }
 
     const mode: AnalysisMode = request.body?.mode === "deep" ? "deep" : "fast";
-    const symbol = normalizeSymbol(snapshot.symbol);
-    const [context, options, account, positionsResponse, journal, riskSettings, marketSnapshots] = await Promise.all([
-      getContextForSymbol(store, tradeContext, symbol),
-      alpaca.getOptionIdeas(symbol).catch(() => []),
-      safeAccount(alpaca),
-      safePositions(alpaca),
-      store.getJournal(),
-      store.getRiskSettings(),
-      getMarketSnapshots(alpaca, store)
-    ]);
+    const { analysisRun } = await createAnalysisFromSnapshot(snapshot, mode, request.body?.notes);
+    response.json({ analysisRun });
+  }));
 
-    const analysisInput = {
-      mode,
-      snapshot: { ...snapshot, symbol },
-      context,
-      options,
-      account,
-      positions: positionsResponse.positions,
-      journal,
-      riskSettings,
-      marketSnapshots
-    };
-    const specialistReports = buildSpecialistReports(analysisInput);
-    const safetyBlockers = buildSafetyBlockers(analysisInput);
-    let managerVerdict = buildFallbackManagerVerdict(analysisInput.snapshot, specialistReports, safetyBlockers);
+  app.get("/api/algo/proposals", asyncHandler(async (_request, response) => {
+    response.json(await store.getAlgoTradeProposals());
+  }));
 
-    if (tradePlanner.configured) {
-      managerVerdict = await tradePlanner.createManagerVerdict({
-        snapshot: analysisInput.snapshot,
-        context,
-        specialistReports,
-        safetyBlockers,
-        userNotes: request.body?.notes
-      });
-      managerVerdict = enforceSafetyOnVerdict(managerVerdict, safetyBlockers);
+  app.post("/api/algo/proposals", asyncHandler(async (request, response) => {
+    const snapshot = request.body?.snapshot as SignalSnapshot | undefined;
+    if (!snapshot?.symbol || !Array.isArray(snapshot.bars)) {
+      response.status(400).json({ error: "A SignalSnapshot with recent bars is required." });
+      return;
     }
 
-    const analysisRun = buildAnalysisRun({ ...analysisInput, managerVerdict });
-    await store.saveAnalysisRun(analysisRun);
-    response.json({ analysisRun });
+    const mode: AnalysisMode = request.body?.mode === "deep" ? "deep" : "fast";
+    const { analysisRun, account, riskSettings } = await createAnalysisFromSnapshot(snapshot, mode, request.body?.notes);
+    const proposals = buildAlgoTradeProposals({
+      analysisRun,
+      account,
+      riskSettings,
+      referencePrice: analysisRun.snapshot.lastPrice
+    });
+    response.json({ analysisRun, proposals: await store.saveAlgoTradeProposals(proposals) });
+  }));
+
+  app.post("/api/algo/proposals/:id/reject", asyncHandler(async (request, response) => {
+    const proposal = await store.updateAlgoTradeProposal(request.params.id, {
+      status: "rejected",
+      reviewedAt: new Date().toISOString(),
+      rejectionReason: optionalString(request.body?.reason) ?? "Rejected after review."
+    });
+    response.json({ proposal });
+  }));
+
+  app.post("/api/algo/proposals/:id/execute", asyncHandler(async (request, response) => {
+    const proposal = await getAlgoProposal(store, request.params.id);
+    if (!proposal.executable || proposal.executionType === "research_only") {
+      response.status(400).json({ error: "This proposal is research-only or missing an executable paper order." });
+      return;
+    }
+    if (proposal.status !== "queued") {
+      response.status(400).json({ error: `This proposal is already ${proposal.status}.` });
+      return;
+    }
+    if (!request.body?.earningsChecked || !request.body?.confirmedPaperOnly || !request.body?.acceptedRisk) {
+      response.status(400).json({ error: "Confirm earnings/event timing, paper-only execution, and accepted risk before placing." });
+      return;
+    }
+
+    const account = await alpaca.getAccount();
+    const riskSettings = await store.getRiskSettings();
+    if (riskSettings.killSwitchEnabled) {
+      response.status(423).json({ error: "Paper order entry is disabled because the kill switch is enabled." });
+      return;
+    }
+    const riskProfile = getRiskProfile(account.equity ?? 100000, riskSettings);
+    let brokerOrder: unknown;
+    let validation: (PaperOrderValidationResult & { order?: PaperOrderRequest }) | undefined = proposal.validation;
+    let journalAction: TradeAction = "watch";
+    let entryPrice: number | undefined;
+
+    if ((proposal.executionType === "long_stock_bracket" || proposal.executionType === "short_stock_bracket") && proposal.order) {
+      const order: PaperOrderRequest = {
+        ...proposal.order,
+        earningsChecked: true,
+        confirmedPaperOnly: true,
+        acceptedRisk: true
+      };
+      const referencePrice = await getReferencePrice(alpaca, order.symbol);
+      validation = validatePaperOrder(order, riskProfile, referencePrice);
+      if (!validation.ok || !validation.order) {
+        const updated = await store.updateAlgoTradeProposal(proposal.id, {
+          status: "blocked",
+          validation,
+          warnings: [...new Set([...proposal.warnings, ...validation.errors])]
+        });
+        response.status(400).json({ proposal: updated, validation });
+        return;
+      }
+      brokerOrder = await alpaca.placePaperBracketOrder(validation.order);
+      journalAction = order.side === "sell" ? "paper_short_candidate" : "paper_long_candidate";
+      entryPrice = referencePrice ?? undefined;
+    } else if (proposal.executionType === "long_option" && proposal.optionOrder) {
+      const optionOrder = {
+        ...proposal.optionOrder,
+        earningsChecked: true,
+        confirmedPaperOnly: true,
+        acceptedRisk: true
+      };
+      const maxRisk = (account.equity ?? 100000) * riskSettings.maxRiskPerTradePct;
+      if (!optionOrder.estimatedMaxLoss || optionOrder.estimatedMaxLoss > maxRisk) {
+        const updated = await store.updateAlgoTradeProposal(proposal.id, {
+          status: "blocked",
+          warnings: [...new Set([...proposal.warnings, "Estimated option max loss exceeds the configured per-trade risk limit."])]
+        });
+        response.status(400).json({ proposal: updated });
+        return;
+      }
+      brokerOrder = await alpaca.placePaperOptionOrder(optionOrder);
+      journalAction = "options_research_only";
+      entryPrice = optionOrder.limitPrice;
+    } else {
+      response.status(400).json({ error: "This proposal is missing an executable paper order." });
+      return;
+    }
+
+    const updated = await store.updateAlgoTradeProposal(proposal.id, {
+      status: "placed",
+      validation,
+      brokerOrder,
+      reviewedAt: new Date().toISOString()
+    });
+    await store.addJournalEntry({
+      symbol: proposal.symbol,
+      status: "paper_open",
+      action: journalAction,
+      notes: `Placed from Algo Command Center proposal: ${proposal.strategyTitle}.`,
+      entryPrice,
+      stopLossPrice: proposal.order?.stopLossPrice,
+      takeProfitPrice: proposal.order?.takeProfitPrice
+    });
+    response.json({ proposal: updated, validation, order: brokerOrder });
   }));
 
   app.get("/api/analysis-runs/:symbol", asyncHandler(async (request, response) => {
@@ -318,6 +448,15 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
     response.json({ positions, orders });
   }));
 
+  app.get("/api/positions/monitor", asyncHandler(async (_request, response) => {
+    const [positions, orders, proposals] = await Promise.all([
+      alpaca.getPositions(),
+      alpaca.getOrders(),
+      store.getAlgoTradeProposals(100)
+    ]);
+    response.json(buildPositionMonitorSnapshot({ positions, openOrders: orders, proposals }));
+  }));
+
   app.post("/api/alpaca/paper-orders", asyncHandler(async (request, response) => {
     const parsed = paperOrderSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -359,6 +498,32 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
 
   app.post("/api/alpaca/paper-orders/cancel-open", asyncHandler(async (_request, response) => {
     response.json({ result: await alpaca.cancelOpenOrders() });
+  }));
+
+  app.post("/api/alpaca/paper-positions/:symbol/close", asyncHandler(async (request, response) => {
+    const symbol = String(request.params.symbol ?? "").trim();
+    if (!symbol) {
+      response.status(400).json({ error: "Position symbol is required." });
+      return;
+    }
+    if (request.body?.confirm !== "CLOSE PAPER POSITION") {
+      response.status(400).json({ error: "Type CLOSE PAPER POSITION to confirm this paper-only exit." });
+      return;
+    }
+
+    const result = await alpaca.closePosition(symbol);
+    const exitPrice = optionalNumber(request.body?.exitPrice);
+    const pnl = optionalNumber(request.body?.pnl);
+    await store.addJournalEntry({
+      symbol,
+      status: "paper_closed",
+      action: normalizeAction(request.body?.action),
+      notes: String(request.body?.notes ?? "Closed from Position Monitor."),
+      exitPrice,
+      pnl,
+      outcome: pnl === undefined ? undefined : pnl > 0 ? "win" : pnl < 0 ? "loss" : "breakeven"
+    });
+    response.json({ result });
   }));
 
   app.post("/api/alpaca/paper-positions/flatten", asyncHandler(async (request, response) => {
@@ -457,6 +622,12 @@ function enforceSafetyOnVerdict<T extends { action: TradeAction; warnings: strin
     action: verdict.action === "avoid" ? "avoid" : "watch",
     warnings: [...new Set([...verdict.warnings, ...blockers.map((blocker) => blocker.message)])]
   };
+}
+
+async function getAlgoProposal(store: AppStore, id: string): Promise<AlgoTradeProposal> {
+  const proposal = (await store.getAlgoTradeProposals(100)).find((item) => item.id === id);
+  if (!proposal) throw new Error("Algo trade proposal not found.");
+  return proposal;
 }
 
 function optionalString(value: unknown): string | undefined {

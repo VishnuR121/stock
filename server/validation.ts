@@ -17,6 +17,7 @@ export const watchlistItemSchema = z.object({
 export const paperOrderSchema = z
   .object({
     symbol: symbolSchema,
+    side: z.enum(["buy", "sell"]).default("buy"),
     orderType: z.enum(["market", "limit"]),
     quantity: z.number().positive().max(100000).optional(),
     notional: z.number().positive().max(10_000_000).optional(),
@@ -70,8 +71,10 @@ export function validatePaperOrder(
   if (!order.acceptedRisk) errors.push("Confirm that you accept the paper-trade risk plan.");
   if (!order.earningsChecked) errors.push("Confirm that you checked earnings or event timing before submitting.");
   if (!entryPrice) errors.push("A current price is required for market order validation.");
-  if (entryPrice && order.stopLossPrice >= entryPrice) errors.push("Stop loss must be below the estimated entry price for a long order.");
-  if (entryPrice && order.takeProfitPrice <= entryPrice) errors.push("Take profit must be above the estimated entry price for a long order.");
+  if (entryPrice && order.side === "buy" && order.stopLossPrice >= entryPrice) errors.push("Stop loss must be below the estimated entry price for a long order.");
+  if (entryPrice && order.side === "buy" && order.takeProfitPrice <= entryPrice) errors.push("Take profit must be above the estimated entry price for a long order.");
+  if (entryPrice && order.side === "sell" && order.stopLossPrice <= entryPrice) errors.push("Stop loss must be above the estimated entry price for a short order.");
+  if (entryPrice && order.side === "sell" && order.takeProfitPrice >= entryPrice) errors.push("Take profit must be below the estimated entry price for a short order.");
   if (order.orderType === "limit" && order.limitPrice && order.limitPrice <= 0) errors.push("Limit price must be positive.");
 
   const estimatedNotional = getEstimatedNotional(order, entryPrice);
@@ -88,8 +91,8 @@ export function validatePaperOrder(
   }
 
   if (entryPrice) {
-    const reward = order.takeProfitPrice - entryPrice;
-    const risk = entryPrice - order.stopLossPrice;
+    const reward = order.side === "sell" ? entryPrice - order.takeProfitPrice : order.takeProfitPrice - entryPrice;
+    const risk = order.side === "sell" ? order.stopLossPrice - entryPrice : entryPrice - order.stopLossPrice;
     const riskReward = risk > 0 ? reward / risk : 0;
     if (riskReward < riskProfile.minRiskReward) {
       warnings.push(`Risk/reward is below ${riskProfile.minRiskReward}:1.`);
@@ -114,7 +117,7 @@ function getEstimatedNotional(order: PaperOrderRequest, entryPrice?: number | nu
 
 function getEstimatedRisk(order: PaperOrderRequest, entryPrice?: number | null): number | null {
   if (!entryPrice) return null;
-  const riskPerShare = entryPrice - order.stopLossPrice;
+  const riskPerShare = order.side === "sell" ? order.stopLossPrice - entryPrice : entryPrice - order.stopLossPrice;
   if (riskPerShare <= 0) return null;
   if (order.quantity) return round(order.quantity * riskPerShare, 2);
   if (order.notional) return round((order.notional / entryPrice) * riskPerShare, 2);

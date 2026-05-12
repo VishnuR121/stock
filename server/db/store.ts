@@ -1,5 +1,6 @@
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import type {
+  AlgoTradeProposal,
   AnalysisRun,
   OpportunityScan,
   RiskSettings,
@@ -30,11 +31,12 @@ export class DatabaseStore implements AppStore {
   constructor(private readonly db: AppDb) {}
 
   async read(): Promise<StoredAppData> {
-    const [watchlist, notes, savedPlans, journal, scans, contexts, settings, signals, opportunityScan] = await Promise.all([
+    const [watchlist, notes, savedPlans, journal, algoTradeProposals, scans, contexts, settings, signals, opportunityScan] = await Promise.all([
       this.getWatchlist(),
       this.getTradeNotes(),
       this.getSavedPlans(),
       this.getJournal(),
+      this.getAlgoTradeProposals(),
       this.getScanHistory(),
       this.getAllCachedContexts(),
       this.getRiskSettings(),
@@ -51,6 +53,7 @@ export class DatabaseStore implements AppStore {
       riskSettings: settings,
       contextCache: contexts,
       journal,
+      algoTradeProposals,
       opportunityScans: opportunityScan ? [opportunityScan] : [],
       scanHistory: scans
     };
@@ -94,6 +97,10 @@ export class DatabaseStore implements AppStore {
       await this.upsertJournalEntry(entry);
     }
 
+    if (normalized.algoTradeProposals.length) {
+      await this.saveAlgoTradeProposals(normalized.algoTradeProposals);
+    }
+
     if (normalized.opportunityScans[0]) {
       await this.saveOpportunityScan(normalized.opportunityScans[0]);
     }
@@ -134,6 +141,7 @@ export class DatabaseStore implements AppStore {
       riskSettings: await this.getRiskSettings(),
       contextCache: {},
       journal: [],
+      algoTradeProposals: [],
       opportunityScans: [],
       scanHistory: []
     };
@@ -303,6 +311,47 @@ export class DatabaseStore implements AppStore {
         set: { value: scan, updatedAt: new Date() }
       });
     return scan;
+  }
+
+  async getAlgoTradeProposals(limit = 50): Promise<AlgoTradeProposal[]> {
+    const rows = await this.db.select().from(appSettings).where(eq(appSettings.key, "algoTradeProposals")).limit(1);
+    const proposals = (rows[0]?.value as AlgoTradeProposal[] | undefined) ?? [];
+    return proposals.slice(0, limit);
+  }
+
+  async saveAlgoTradeProposals(proposals: AlgoTradeProposal[]): Promise<AlgoTradeProposal[]> {
+    const current = await this.getAlgoTradeProposals(100);
+    const ids = new Set(proposals.map((proposal) => proposal.id));
+    const next = [...proposals, ...current.filter((proposal) => !ids.has(proposal.id))].slice(0, 100);
+    await this.db
+      .insert(appSettings)
+      .values({ key: "algoTradeProposals", value: next, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: appSettings.key,
+        set: { value: next, updatedAt: new Date() }
+      });
+    return proposals;
+  }
+
+  async updateAlgoTradeProposal(id: string, patch: Partial<AlgoTradeProposal>): Promise<AlgoTradeProposal> {
+    const current = await this.getAlgoTradeProposals(100);
+    const index = current.findIndex((proposal) => proposal.id === id);
+    if (index === -1) throw new Error("Algo trade proposal not found.");
+    const nextProposal: AlgoTradeProposal = {
+      ...current[index],
+      ...patch,
+      id,
+      updatedAt: new Date().toISOString()
+    };
+    current[index] = nextProposal;
+    await this.db
+      .insert(appSettings)
+      .values({ key: "algoTradeProposals", value: current, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: appSettings.key,
+        set: { value: current, updatedAt: new Date() }
+      });
+    return nextProposal;
   }
 
   async addJournalEntry(entry: Omit<TradeJournalEntry, "id" | "createdAt" | "updatedAt">): Promise<TradeJournalEntry> {

@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { integer, jsonb, numeric, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import type {
+  AlgoTradeProposal,
   AnalysisRun,
   OpportunityScan,
   RiskSettings,
@@ -74,7 +75,7 @@ export const tradingViewSignals = pgTable("tradingview_signals", {
 
 export const appSettings = pgTable("app_settings", {
   key: text("key").primaryKey(),
-  value: jsonb("value").$type<RiskSettings | OpportunityScan | Record<string, unknown>>().notNull(),
+  value: jsonb("value").$type<RiskSettings | OpportunityScan | AlgoTradeProposal[] | Record<string, unknown>>().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
 

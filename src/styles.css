@@ -520,6 +520,153 @@ h3 {
   font-size: 0.82rem;
 }
 
+.algoPanel {
+  display: grid;
+  gap: 12px;
+}
+
+.algoEmpty {
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.algoList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.algoCard {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface-soft);
+}
+
+.algoCard.placed {
+  border-color: var(--success-border);
+  background: var(--success-surface);
+}
+
+.algoCard.blocked,
+.algoCard.rejected {
+  border-color: var(--warn-border);
+  background: var(--warn-surface);
+}
+
+.algoTopline,
+.algoActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.algoTopline {
+  justify-content: space-between;
+}
+
+.algoTopline div {
+  display: grid;
+  min-width: 0;
+}
+
+.algoTopline span,
+.algoCard small {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.algoTopline em {
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--text);
+  background: var(--surface-muted);
+  font-size: 0.7rem;
+  font-style: normal;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.algoCard p {
+  margin: 0;
+}
+
+.algoActions .textButton {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 0.82rem;
+}
+
+.monitorPanel {
+  display: grid;
+  gap: 12px;
+}
+
+.monitorSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.monitorSummary span {
+  border-radius: 8px;
+  padding: 7px 9px;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+
+.monitorList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.monitorCard {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface-soft);
+}
+
+.monitorCard.watch {
+  border-color: var(--warn-border);
+  background: var(--warn-surface);
+}
+
+.monitorCard.exit {
+  border-color: var(--danger-border);
+  background: var(--danger-surface);
+}
+
+.monitorCard.hold {
+  border-color: var(--success-border);
+  background: var(--success-surface);
+}
+
+.monitorCard p {
+  margin: 0;
+}
+
+.monitorCard small {
+  color: var(--text-muted);
+  font-weight: 800;
+  line-height: 1.35;
+}
+
 .detailHeader {
   align-items: flex-start;
   gap: 12px;
@@ -1493,6 +1640,8 @@ th {
   .signalGrid,
   .focusGrid,
   .opportunityGrid,
+  .algoList,
+  .monitorList,
   .scenarioGrid,
   .specialistGrid,
   .strategyGrid,

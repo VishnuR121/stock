@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type {
+  AlgoTradeProposal,
   AnalysisRun,
   BrokerAccountSnapshot,
   EnrichedTradePlanResponse,
@@ -30,6 +31,8 @@ import type {
   OpportunityScan,
   OptionIdea,
   PaperOrderRequest,
+  PositionMonitorSnapshot,
+  MonitoredPosition,
   RiskSettings,
   SavedTradePlan,
   SignalSnapshot,
@@ -57,6 +60,7 @@ type AnalysisView = "decision" | "plan";
 
 const emptyOrder: PaperOrderRequest = {
   symbol: "",
+  side: "buy",
   orderType: "market",
   quantity: 1,
   stopLossPrice: 0,
@@ -77,6 +81,8 @@ export function App() {
   const [tradePlans, setTradePlans] = useState<Record<string, SavedTradePlan>>({});
   const [journal, setJournal] = useState<TradeJournalEntry[]>([]);
   const [opportunityScan, setOpportunityScan] = useState<OpportunityScan | null>(null);
+  const [algoProposals, setAlgoProposals] = useState<AlgoTradeProposal[]>([]);
+  const [positionMonitor, setPositionMonitor] = useState<PositionMonitorSnapshot | null>(null);
   const [options, setOptions] = useState<OptionIdea[]>([]);
   const [account, setAccount] = useState<BrokerAccountSnapshot | null>(null);
   const [positions, setPositions] = useState<PositionsResponse | null>(null);
@@ -131,7 +137,7 @@ export function App() {
       ]);
       setHealth(healthData);
       setWatchlist(watchlistData);
-      await Promise.all([loadAccount(), loadPositions(), loadSavedPlans(), loadJournal(), loadRiskSettings()]);
+      await Promise.all([loadAccount(), loadPositions(), loadSavedPlans(), loadJournal(), loadRiskSettings(), loadAlgoProposals(), loadPositionMonitor()]);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -168,6 +174,22 @@ export function App() {
       setJournal(await api<TradeJournalEntry[]>("/api/journal"));
     } catch {
       setJournal([]);
+    }
+  }
+
+  async function loadAlgoProposals() {
+    try {
+      setAlgoProposals(await api<AlgoTradeProposal[]>("/api/algo/proposals"));
+    } catch {
+      setAlgoProposals([]);
+    }
+  }
+
+  async function loadPositionMonitor() {
+    try {
+      setPositionMonitor(await api<PositionMonitorSnapshot>("/api/positions/monitor"));
+    } catch {
+      setPositionMonitor(null);
     }
   }
 
@@ -372,6 +394,68 @@ export function App() {
     }
   }
 
+  async function generateAlgoProposals() {
+    if (!activeSignal) return;
+    setBusy("algo");
+    setMessage(null);
+    try {
+      const result = await api<{ analysisRun: AnalysisRun; proposals: AlgoTradeProposal[] }>("/api/algo/proposals", {
+        method: "POST",
+        body: JSON.stringify({ snapshot: activeSignal, mode: "fast" })
+      });
+      setAnalysisRuns((current) => ({ ...current, [activeSignal.symbol]: result.analysisRun }));
+      setAlgoProposals((current) => {
+        const ids = new Set(result.proposals.map((proposal) => proposal.id));
+        return [...result.proposals, ...current.filter((proposal) => !ids.has(proposal.id))].slice(0, 25);
+      });
+      setAnalysisView("decision");
+      setMessage("Algo proposals added to the approval queue.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function executeAlgoProposal(proposal: AlgoTradeProposal) {
+    setBusy(`algo-execute-${proposal.id}`);
+    setMessage(null);
+    try {
+      const result = await api<{ proposal: AlgoTradeProposal }>(`/api/algo/proposals/${proposal.id}/execute`, {
+        method: "POST",
+        body: JSON.stringify({
+          earningsChecked: true,
+          confirmedPaperOnly: true,
+          acceptedRisk: true
+        })
+      });
+      setAlgoProposals((current) => current.map((item) => item.id === proposal.id ? result.proposal : item));
+      setMessage(`${proposal.symbol} paper order placed from approved algo proposal.`);
+      await Promise.all([loadAccount(), loadPositions(), loadJournal(), loadPositionMonitor()]);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function rejectAlgoProposal(proposal: AlgoTradeProposal) {
+    setBusy(`algo-reject-${proposal.id}`);
+    setMessage(null);
+    try {
+      const result = await api<{ proposal: AlgoTradeProposal }>(`/api/algo/proposals/${proposal.id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ reason: "Rejected from dashboard." })
+      });
+      setAlgoProposals((current) => current.map((item) => item.id === proposal.id ? result.proposal : item));
+      setMessage(`${proposal.symbol} algo proposal rejected.`);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function setKillSwitch(enabled: boolean) {
     if (!riskSettings) return;
     setBusy("risk");
@@ -396,7 +480,7 @@ export function App() {
     try {
       await api("/api/alpaca/paper-orders/cancel-open", { method: "POST", body: JSON.stringify({}) });
       setMessage("Open paper orders canceled.");
-      await loadPositions();
+      await Promise.all([loadPositions(), loadPositionMonitor()]);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -415,7 +499,7 @@ export function App() {
         body: JSON.stringify({ confirm })
       });
       setMessage("Flatten paper positions request sent.");
-      await Promise.all([loadAccount(), loadPositions()]);
+      await Promise.all([loadAccount(), loadPositions(), loadPositionMonitor()]);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -460,7 +544,45 @@ export function App() {
       });
       setReviewingOrder(false);
       setMessage("Paper bracket order submitted.");
-      await Promise.all([loadAccount(), loadPositions()]);
+      await Promise.all([loadAccount(), loadPositions(), loadPositionMonitor()]);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function refreshPositionMonitor() {
+    setBusy("position-monitor");
+    setMessage(null);
+    try {
+      await Promise.all([loadPositions(), loadPositionMonitor()]);
+      setMessage("Position monitor refreshed.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function closeMonitoredPosition(position: MonitoredPosition) {
+    const confirm = window.prompt(`Type CLOSE PAPER POSITION to close ${position.symbol}.`);
+    if (confirm !== "CLOSE PAPER POSITION") return;
+    setBusy(`close-position-${position.symbol}`);
+    setMessage(null);
+    try {
+      await api(`/api/alpaca/paper-positions/${encodeURIComponent(position.symbol)}/close`, {
+        method: "POST",
+        body: JSON.stringify({
+          confirm,
+          action: position.executionType === "long_option" ? "options_research_only" : position.side === "short" ? "paper_short_candidate" : "paper_long_candidate",
+          exitPrice: position.currentPrice,
+          pnl: position.unrealizedPl,
+          notes: `Closed from Position Monitor. ${position.suggestedAction}`
+        })
+      });
+      setMessage(`${position.symbol} close request sent.`);
+      await Promise.all([loadAccount(), loadPositions(), loadJournal(), loadPositionMonitor()]);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -600,6 +722,22 @@ export function App() {
             onAnalyze={analyzeOpportunity}
             onAddToWatchlist={addOpportunityToWatchlist}
             onRunScan={runOpportunityScan}
+          />
+
+          <AlgoCommandCenter
+            activeSignal={activeSignal}
+            proposals={algoProposals}
+            busy={busy}
+            onGenerate={generateAlgoProposals}
+            onExecute={executeAlgoProposal}
+            onReject={rejectAlgoProposal}
+          />
+
+          <PositionMonitorPanel
+            monitor={positionMonitor}
+            busy={busy}
+            onRefresh={refreshPositionMonitor}
+            onClose={closeMonitoredPosition}
           />
 
           <section className="panel">
@@ -783,7 +921,7 @@ export function App() {
             <dl className="reviewList">
               <div>
                 <dt>Entry</dt>
-                <dd>{orderDraft.orderType === "limit" ? formatCurrency(orderDraft.limitPrice) : "Market"}</dd>
+                <dd>{orderDraft.side === "sell" ? "Short sell" : "Buy"} / {orderDraft.orderType === "limit" ? formatCurrency(orderDraft.limitPrice) : "Market"}</dd>
               </div>
               <div>
                 <dt>Size</dt>
@@ -940,6 +1078,167 @@ function OpportunityFinderPanel({
   );
 }
 
+function AlgoCommandCenter({
+  activeSignal,
+  proposals,
+  busy,
+  onGenerate,
+  onExecute,
+  onReject
+}: {
+  activeSignal: SignalSnapshot | null;
+  proposals: AlgoTradeProposal[];
+  busy: string | null;
+  onGenerate: () => void;
+  onExecute: (proposal: AlgoTradeProposal) => void;
+  onReject: (proposal: AlgoTradeProposal) => void;
+}) {
+  const visible = proposals.slice(0, 4);
+  const loading = busy === "algo";
+
+  return (
+    <section className="panel algoPanel" aria-label="Algo Command Center">
+      <div className="panelTitle spaced">
+        <div>
+          <h2>Algo Command Center</h2>
+          <p>Bot-built trade proposals. You approve before any paper order is sent.</p>
+        </div>
+        <button className="textButton" onClick={onGenerate} disabled={!activeSignal || loading}>
+          {loading ? <Loader2 className="spin" size={17} /> : <Bot size={17} />}
+          <span>{activeSignal ? `Build ${activeSignal.symbol}` : "Select ticker"}</span>
+        </button>
+      </div>
+
+      {!visible.length ? (
+        <div className="algoEmpty">Generate proposals from a selected ticker to create an approval queue.</div>
+      ) : (
+        <div className="algoList">
+          {visible.map((proposal) => (
+            <article key={proposal.id} className={`algoCard ${proposal.status}`}>
+              <div className="algoTopline">
+                <div>
+                  <strong>{proposal.symbol}</strong>
+                  <span>{proposal.strategyTitle} - {proposal.direction}</span>
+                </div>
+                <em>{proposal.status}</em>
+              </div>
+              <p>{proposal.summary}</p>
+              <div className="strategyStats">
+                <span>Score {proposal.score}</span>
+                <span>{proposal.executable ? "Executable paper bracket" : "Research only"}</span>
+                {proposal.order && <span>{proposal.order.quantity} shares</span>}
+                {proposal.optionOrder && <span>{proposal.optionOrder.contractSymbol}</span>}
+                {proposal.optionOrder && <span>{proposal.optionOrder.quantity} contract</span>}
+                {proposal.optionOrder?.limitPrice && <span>Limit {formatCurrency(proposal.optionOrder.limitPrice)}</span>}
+                {proposal.order && <span>Stop {formatCurrency(proposal.order.stopLossPrice)}</span>}
+                {proposal.order && <span>Target {formatCurrency(proposal.order.takeProfitPrice)}</span>}
+              </div>
+              {proposal.warnings[0] && <small>{proposal.warnings[0]}</small>}
+              <div className="algoActions">
+                <button
+                  className="textButton"
+                  onClick={() => onExecute(proposal)}
+                  disabled={!proposal.executable || proposal.status !== "queued" || busy === `algo-execute-${proposal.id}`}
+                >
+                  {busy === `algo-execute-${proposal.id}` ? <Loader2 className="spin" size={16} /> : <CheckCircle2 size={16} />}
+                  <span>Approve + place</span>
+                </button>
+                <button
+                  className="textButton ghost"
+                  onClick={() => onReject(proposal)}
+                  disabled={proposal.status !== "queued" || busy === `algo-reject-${proposal.id}`}
+                >
+                  <Trash2 size={16} />
+                  <span>Reject</span>
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PositionMonitorPanel({
+  monitor,
+  busy,
+  onRefresh,
+  onClose
+}: {
+  monitor: PositionMonitorSnapshot | null;
+  busy: string | null;
+  onRefresh: () => void;
+  onClose: (position: MonitoredPosition) => void;
+}) {
+  const positions = monitor?.positions.slice(0, 6) ?? [];
+
+  return (
+    <section className="panel monitorPanel" aria-label="Position Monitor">
+      <div className="panelTitle spaced">
+        <div>
+          <h2>Position Monitor</h2>
+          <p>Exit rules for paper positions. Option exits need explicit close approval.</p>
+        </div>
+        <button className="textButton secondary" onClick={onRefresh} disabled={busy === "position-monitor"}>
+          {busy === "position-monitor" ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
+          <span>Refresh monitor</span>
+        </button>
+      </div>
+
+      {monitor && (
+        <div className="monitorSummary">
+          <span>{monitor.summary.totalPositions} positions</span>
+          <span>{monitor.summary.exitsSuggested} exits</span>
+          <span>{monitor.summary.watchCount} watch</span>
+          <span>{formatCurrency(monitor.summary.totalUnrealizedPl)} open P/L</span>
+          <span>Updated {formatDateTime(monitor.generatedAt)}</span>
+        </div>
+      )}
+
+      {!positions.length ? (
+        <div className="algoEmpty">No open Alpaca paper positions found.</div>
+      ) : (
+        <div className="monitorList">
+          {positions.map((position) => (
+            <article key={position.symbol} className={`monitorCard ${position.urgency}`}>
+              <div className="algoTopline">
+                <div>
+                  <strong>{position.symbol}</strong>
+                  <span>{position.side} {position.strategyKind ? `- ${formatStrategyKind(position.strategyKind)}` : ""}</span>
+                </div>
+                <em>{position.urgency}</em>
+              </div>
+              <p>{position.suggestedAction}</p>
+              <div className="strategyStats">
+                <span>{position.quantity ?? "--"} qty</span>
+                <span>Avg {formatCurrency(position.avgEntryPrice)}</span>
+                <span>Now {formatCurrency(position.currentPrice)}</span>
+                <span>P/L {formatCurrency(position.unrealizedPl)}</span>
+                {typeof position.unrealizedPlPct === "number" && <span>{formatPct(position.unrealizedPlPct)}</span>}
+                {position.daysToExpiration !== undefined && <span>{position.daysToExpiration} DTE</span>}
+                {position.stopLossPrice !== undefined && <span>Stop {formatCurrency(position.stopLossPrice)}</span>}
+                {position.takeProfitPrice !== undefined && <span>Target {formatCurrency(position.takeProfitPrice)}</span>}
+              </div>
+              <small>{position.reasons[0]}</small>
+              <div className="algoActions">
+                <button
+                  className={`textButton ${position.urgency === "exit" ? "danger" : "ghost"}`}
+                  onClick={() => onClose(position)}
+                  disabled={busy === `close-position-${position.symbol}`}
+                >
+                  {busy === `close-position-${position.symbol}` ? <Loader2 className="spin" size={16} /> : <AlertTriangle size={16} />}
+                  <span>Close position</span>
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function getOpportunitySummary(scan: OpportunityScan | null): string {
   if (!scan) return "Closed. Expand to find ranked tickers.";
   const top = scan.candidates[0];
@@ -1070,6 +1369,13 @@ function PaperOrderForm({
       <label>
         <span>Symbol</span>
         <input value={orderDraft.symbol} onChange={(event) => update({ symbol: event.target.value.toUpperCase() })} />
+      </label>
+      <label>
+        <span>Side</span>
+        <select value={orderDraft.side} onChange={(event) => update({ side: event.target.value as "buy" | "sell" })}>
+          <option value="buy">Buy / long</option>
+          <option value="sell">Sell short</option>
+        </select>
       </label>
       <label>
         <span>Order</span>
@@ -1644,6 +1950,10 @@ function formatAction(action?: TradeAction): string {
     default:
       return "Watch";
   }
+}
+
+function formatStrategyKind(kind: AlgoTradeProposal["strategyKind"]): string {
+  return kind.replaceAll("_", " ");
 }
 
 function getInitialTheme(): ThemeMode {

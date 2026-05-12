@@ -113,6 +113,30 @@ describe("API safety behavior", () => {
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/v2/orders"), expect.anything());
   });
 
+  it("closes a single paper position after explicit confirmation", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const target = String(url);
+      if (target.includes("/v2/positions/XLI") && init?.method === "DELETE") {
+        return jsonResponse({ id: "close-order", symbol: "XLI" });
+      }
+      return jsonResponse({});
+    });
+
+    const app = createApp({
+      alpacaKeyId: "key",
+      alpacaSecretKey: "secret",
+      databaseUrl: undefined,
+      dataFilePath: `data/test-close-position-${Date.now()}.json`
+    });
+
+    await request(app)
+      .post("/api/alpaca/paper-positions/XLI/close")
+      .send({ confirm: "CLOSE PAPER POSITION", action: "paper_long_candidate", pnl: 15 })
+      .expect(200);
+
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/v2/positions/XLI"), expect.objectContaining({ method: "DELETE" }));
+  });
+
   it("requires a TradingView webhook secret", async () => {
     const app = createApp({
       dataFilePath: "data/test-tv-no-secret.json",

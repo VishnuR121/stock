@@ -89,4 +89,27 @@ describe("paper order validation", () => {
     expect(result.ok).toBe(true);
     expect(result.warnings.join(" ")).toMatch(/Risk\/reward/);
   });
+
+  it("accepts a conservative short equity paper order", () => {
+    const result = validatePaperOrder(
+      {
+        symbol: "SPY",
+        side: "sell",
+        orderType: "market",
+        quantity: 10,
+        stopLossPrice: 105,
+        takeProfitPrice: 90,
+        timeInForce: "day",
+        earningsChecked: true,
+        confirmedPaperOnly: true,
+        acceptedRisk: true
+      },
+      riskProfile,
+      100
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.estimatedNotional).toBe(1000);
+    expect(result.estimatedRisk).toBe(50);
+  });
 });

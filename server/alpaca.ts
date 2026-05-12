@@ -1,4 +1,4 @@
-import type { Bar, BrokerAccountSnapshot, PaperOrderRequest } from "../src/shared/types";
+import type { Bar, BrokerAccountSnapshot, OptionOrderRequest, PaperOrderRequest } from "../src/shared/types";
 import { isPaperAlpacaUrl, type AppConfig } from "./config";
 import { mapOptionContractsToIdeas } from "./options";
 
@@ -102,7 +102,7 @@ export class AlpacaClient {
   async placePaperBracketOrder(order: PaperOrderRequest): Promise<unknown> {
     const body: Record<string, unknown> = {
       symbol: order.symbol,
-      side: "buy",
+      side: order.side,
       type: order.orderType,
       time_in_force: order.timeInForce,
       order_class: "bracket",
@@ -126,6 +126,25 @@ export class AlpacaClient {
     });
   }
 
+  async placePaperOptionOrder(order: OptionOrderRequest): Promise<unknown> {
+    const body: Record<string, unknown> = {
+      symbol: order.contractSymbol,
+      qty: String(order.quantity),
+      side: "buy",
+      type: order.orderType,
+      time_in_force: order.timeInForce,
+      extended_hours: false,
+      client_order_id: `copilot-option-paper-${Date.now()}`
+    };
+
+    if (order.orderType === "limit" && order.limitPrice) body.limit_price = order.limitPrice.toFixed(2);
+
+    return this.tradingRequest("/v2/orders", {
+      method: "POST",
+      body: JSON.stringify(body)
+    });
+  }
+
   async cancelOpenOrders(): Promise<unknown> {
     return this.tradingRequest("/v2/orders", {
       method: "DELETE"
@@ -134,6 +153,12 @@ export class AlpacaClient {
 
   async closeAllPositions(): Promise<unknown> {
     return this.tradingRequest("/v2/positions", {
+      method: "DELETE"
+    });
+  }
+
+  async closePosition(symbolOrAssetId: string): Promise<unknown> {
+    return this.tradingRequest(`/v2/positions/${encodeURIComponent(symbolOrAssetId)}`, {
       method: "DELETE"
     });
   }

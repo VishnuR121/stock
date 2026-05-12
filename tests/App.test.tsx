@@ -49,6 +49,7 @@ describe("dashboard", () => {
     expect((await screen.findAllByText("SPY")).length).toBeGreaterThan(0);
     expect(screen.getByText("Run scan")).toBeInTheDocument();
     expect(screen.getByText("Opportunity Finder")).toBeInTheDocument();
+    expect(screen.getByText("Algo Command Center")).toBeInTheDocument();
   });
 
   it("loads an opportunity candidate and can add it to the watchlist", async () => {

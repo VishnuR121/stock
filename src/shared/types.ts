@@ -1,5 +1,6 @@
 export type SignalBias = "bullish" | "neutral" | "bearish" | "caution";
 export type TrendState = "uptrend" | "downtrend" | "range" | "insufficient_data";
+export type OrderSide = "buy" | "sell";
 export type OrderTimeInForce = "day" | "gtc";
 export type OrderType = "market" | "limit";
 export type OptionType = "call" | "put";
@@ -24,6 +25,9 @@ export type StrategyKind =
   | "cash_secured_put"
   | "watch_only";
 export type StrategySuitability = "candidate" | "watch" | "research" | "avoid";
+export type AlgoProposalStatus = "queued" | "rejected" | "placed" | "blocked";
+export type AlgoExecutionType = "long_stock_bracket" | "short_stock_bracket" | "long_option" | "research_only";
+export type ExitUrgency = "hold" | "watch" | "exit";
 export type OpportunityCategory =
   | "bullish_long"
   | "bearish_short"
@@ -269,6 +273,67 @@ export interface AnalysisRun {
   managerVerdict: ManagerVerdict;
 }
 
+export interface AlgoTradeProposal {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  symbol: string;
+  sourceAnalysisId: string;
+  signalAsOf: string;
+  strategyKind: StrategyKind;
+  strategyTitle: string;
+  direction: StrategyCandidate["direction"];
+  status: AlgoProposalStatus;
+  executionType: AlgoExecutionType;
+  executable: boolean;
+  score: number;
+  summary: string;
+  setup: string[];
+  riskNotes: string[];
+  warnings: string[];
+  order?: PaperOrderRequest;
+  optionOrder?: OptionOrderRequest;
+  validation?: PaperOrderValidationResult;
+  brokerOrder?: unknown;
+  reviewedAt?: string;
+  rejectionReason?: string;
+}
+
+export interface MonitoredPosition {
+  symbol: string;
+  assetClass?: string;
+  side: "long" | "short";
+  quantity: number | null;
+  avgEntryPrice: number | null;
+  currentPrice: number | null;
+  marketValue: number | null;
+  unrealizedPl: number | null;
+  unrealizedPlPct: number | null;
+  costBasis: number | null;
+  matchedProposalId?: string;
+  strategyKind?: StrategyKind;
+  executionType?: AlgoExecutionType;
+  stopLossPrice?: number;
+  takeProfitPrice?: number;
+  optionExpirationDate?: string;
+  daysToExpiration?: number;
+  urgency: ExitUrgency;
+  suggestedAction: string;
+  reasons: string[];
+}
+
+export interface PositionMonitorSnapshot {
+  generatedAt: string;
+  positions: MonitoredPosition[];
+  openOrders: unknown[];
+  summary: {
+    totalPositions: number;
+    exitsSuggested: number;
+    watchCount: number;
+    totalUnrealizedPl: number | null;
+  };
+}
+
 export interface OpportunityCandidate {
   symbol: string;
   rank: number;
@@ -331,6 +396,7 @@ export interface TradeJournalEntry {
 
 export interface PaperOrderRequest {
   symbol: string;
+  side: OrderSide;
   orderType: OrderType;
   quantity?: number;
   notional?: number;
@@ -338,6 +404,21 @@ export interface PaperOrderRequest {
   stopLossPrice: number;
   takeProfitPrice: number;
   timeInForce: OrderTimeInForce;
+  earningsChecked: boolean;
+  confirmedPaperOnly: boolean;
+  acceptedRisk: boolean;
+}
+
+export interface OptionOrderRequest {
+  contractSymbol: string;
+  underlyingSymbol: string;
+  optionType: OptionType;
+  orderType: OrderType;
+  quantity: number;
+  limitPrice?: number;
+  timeInForce: OrderTimeInForce;
+  estimatedPremium: number | null;
+  estimatedMaxLoss: number | null;
   earningsChecked: boolean;
   confirmedPaperOnly: boolean;
   acceptedRisk: boolean;
@@ -394,6 +475,7 @@ export interface StoredAppData {
   riskSettings: RiskSettings;
   contextCache: Record<string, TradeContext>;
   journal: TradeJournalEntry[];
+  algoTradeProposals: AlgoTradeProposal[];
   opportunityScans: OpportunityScan[];
   scanHistory: Array<{
     id: string;
