@@ -15,8 +15,13 @@ describe("dashboard", () => {
           ok: true,
           alpacaConfigured: false,
           alpacaPaperOnly: true,
+          aiProvider: "openai",
+          aiConfigured: false,
+          aiModel: "gpt-5.4-mini",
           openAiConfigured: false,
           openAiModel: "gpt-5.4-mini",
+          anthropicConfigured: false,
+          anthropicModel: "claude-sonnet-4-6",
           alphaVantageConfigured: false,
           databaseConfigured: false,
           dataStore: "data/app-data.json"

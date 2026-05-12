@@ -516,9 +516,10 @@ export function App() {
                   />
                   <StatusTile
                     icon={<Bot size={20} />}
-                    label="OpenAI"
-                    value={health?.openAiConfigured ? health.openAiModel : "Needs key"}
-                    tone={health?.openAiConfigured ? "good" : "warn"}
+                    label="AI Provider"
+                    value={health?.aiConfigured ? formatAiProvider(health.aiProvider) : `${formatAiProvider(health?.aiProvider)} needs key`}
+                    detail={health?.aiConfigured ? health.aiModel : undefined}
+                    tone={health?.aiConfigured ? "good" : "warn"}
                   />
                   <StatusTile
                     icon={<CircleDollarSign size={20} />}
@@ -808,13 +809,26 @@ export function App() {
   );
 }
 
-function StatusTile({ icon, label, value, tone }: { icon: JSX.Element; label: string; value: string; tone: string }) {
+function StatusTile({
+  icon,
+  label,
+  value,
+  detail,
+  tone
+}: {
+  icon: JSX.Element;
+  label: string;
+  value: string;
+  detail?: string;
+  tone: string;
+}) {
   return (
     <article className={`statusTile ${tone}`}>
       {icon}
       <div>
         <span>{label}</span>
         <strong>{value}</strong>
+        {detail && <small>{detail}</small>}
       </div>
     </article>
   );
@@ -1585,6 +1599,10 @@ function formatOptionalPct(value?: number | null): string {
 
 function formatNumber(value?: number | null): string {
   return typeof value === "number" && Number.isFinite(value) ? String(value) : "--";
+}
+
+function formatAiProvider(provider?: HealthStatus["aiProvider"]): string {
+  return provider === "anthropic" ? "Claude" : "OpenAI";
 }
 
 function formatOpportunityCategory(category: OpportunityCandidate["category"]): string {

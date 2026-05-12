@@ -407,8 +407,13 @@ export interface HealthStatus {
   ok: boolean;
   alpacaConfigured: boolean;
   alpacaPaperOnly: boolean;
+  aiProvider: "openai" | "anthropic";
+  aiConfigured: boolean;
+  aiModel: string;
   openAiConfigured: boolean;
   openAiModel: string;
+  anthropicConfigured: boolean;
+  anthropicModel: string;
   alphaVantageConfigured: boolean;
   databaseConfigured: boolean;
   dataStore: string;

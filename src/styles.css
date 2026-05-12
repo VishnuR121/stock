@@ -254,11 +254,25 @@ h3 {
   flex: 0 0 auto;
 }
 
+.statusTile div {
+  min-width: 0;
+}
+
 .statusTile strong {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.statusTile small {
+  display: block;
+  max-width: 100%;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .statusTile.good svg {
@@ -874,9 +888,8 @@ select {
 .metricGrid strong,
 .accountGrid strong {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .accountList {

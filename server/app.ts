@@ -3,10 +3,10 @@ import express, { type Request, type Response } from "express";
 import path from "node:path";
 import { AlpacaClient } from "./alpaca";
 import { buildAnalysisRun, buildFallbackManagerVerdict, buildSafetyBlockers, buildSpecialistReports } from "./analysis";
+import { createTradePlanner } from "./ai";
 import { getConfig, isPaperAlpacaUrl, type AppConfig } from "./config";
 import { TradeContextService } from "./context";
 import { buildSignalSnapshot, getDefaultRiskProfile } from "./indicators";
-import { OpenAiTradePlanner } from "./openai";
 import { buildOpportunityScan, dateKey } from "./opportunities";
 import { enrichOptionIdeas } from "./options";
 import { createStore, getStoreDescription } from "./storeFactory";
@@ -32,7 +32,7 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
   const config = getConfig(overrides);
   const store = createStore(config);
   const alpaca = new AlpacaClient(config);
-  const tradePlanner = new OpenAiTradePlanner(config);
+  const tradePlanner = createTradePlanner(config);
   const tradeContext = new TradeContextService(config);
   const app = express();
 
@@ -44,8 +44,13 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       ok: true,
       alpacaConfigured: alpaca.configured,
       alpacaPaperOnly: isPaperAlpacaUrl(config.alpacaPaperBaseUrl),
-      openAiConfigured: tradePlanner.configured,
+      aiProvider: config.aiProvider,
+      aiConfigured: tradePlanner.configured,
+      aiModel: config.aiProvider === "anthropic" ? config.anthropicModel : config.openAiModel,
+      openAiConfigured: Boolean(config.openAiApiKey),
       openAiModel: config.openAiModel,
+      anthropicConfigured: Boolean(config.anthropicApiKey),
+      anthropicModel: config.anthropicModel,
       alphaVantageConfigured: Boolean(config.alphaVantageApiKey),
       databaseConfigured: Boolean(config.databaseUrl),
       dataStore: getStoreDescription(config) === "postgres" ? "postgres" : path.resolve(config.dataFilePath)

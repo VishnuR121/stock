@@ -21,6 +21,24 @@ describe("API safety behavior", () => {
     expect(response.body.alpacaPaperOnly).toBe(false);
   });
 
+  it("reports the selected Anthropic AI provider", async () => {
+    const app = createApp({
+      aiProvider: "anthropic",
+      anthropicApiKey: "anthropic-key",
+      anthropicModel: "claude-test-model",
+      openAiApiKey: undefined,
+      databaseUrl: undefined,
+      dataFilePath: "data/test-anthropic-health.json"
+    });
+
+    const response = await request(app).get("/api/health").expect(200);
+    expect(response.body.aiProvider).toBe("anthropic");
+    expect(response.body.aiConfigured).toBe(true);
+    expect(response.body.aiModel).toBe("claude-test-model");
+    expect(response.body.openAiConfigured).toBe(false);
+    expect(response.body.anthropicConfigured).toBe(true);
+  });
+
   it("blocks account calls when the Alpaca URL is not paper", async () => {
     const app = createApp({
       alpacaPaperBaseUrl: "https://api.alpaca.markets",

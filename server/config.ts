@@ -5,14 +5,20 @@ dotenv.config();
 
 const DEFAULT_PAPER_BASE_URL = "https://paper-api.alpaca.markets";
 const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
+const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
+
+export type AiProvider = "openai" | "anthropic";
 
 export interface AppConfig {
   port: number;
   alpacaKeyId?: string;
   alpacaSecretKey?: string;
   alpacaPaperBaseUrl: string;
+  aiProvider: AiProvider;
   openAiApiKey?: string;
   openAiModel: string;
+  anthropicApiKey?: string;
+  anthropicModel: string;
   alphaVantageApiKey?: string;
   secUserAgent: string;
   databaseUrl?: string;
@@ -26,8 +32,11 @@ export function getConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     alpacaKeyId: process.env.ALPACA_API_KEY_ID,
     alpacaSecretKey: process.env.ALPACA_API_SECRET_KEY,
     alpacaPaperBaseUrl: process.env.ALPACA_PAPER_BASE_URL || DEFAULT_PAPER_BASE_URL,
+    aiProvider: normalizeAiProvider(process.env.AI_PROVIDER),
     openAiApiKey: process.env.OPENAI_API_KEY,
     openAiModel: process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+    anthropicModel: process.env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL,
     alphaVantageApiKey: process.env.ALPHA_VANTAGE_API_KEY,
     secUserAgent: process.env.SEC_USER_AGENT || "ResearchCopilot/0.1 contact@example.com",
     databaseUrl: process.env.DATABASE_URL,
@@ -35,6 +44,10 @@ export function getConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     tradingViewWebhookSecret: process.env.TRADINGVIEW_WEBHOOK_SECRET,
     ...overrides
   };
+}
+
+function normalizeAiProvider(value?: string): AiProvider {
+  return value?.toLowerCase() === "anthropic" ? "anthropic" : "openai";
 }
 
 export function isPaperAlpacaUrl(url: string): boolean {
