@@ -15,8 +15,22 @@
   --accent-soft: #d9eee8;
   --warn: #bd6c15;
   --warn-soft: #fff8e6;
+  --warn-surface: #fff8e6;
+  --warn-border: #e8ce8d;
+  --warn-text: #87500d;
   --danger: #9f2d3a;
   --danger-soft: #fff0f2;
+  --danger-surface: #fff0f2;
+  --danger-border: #e9b8c0;
+  --danger-text: #812332;
+  --success-soft: #d9eee8;
+  --success-surface: #edf8f4;
+  --success-border: #9ed6c8;
+  --success-text: #0f4c45;
+  --info-soft: #dceaf8;
+  --info-surface: #eef6fb;
+  --info-border: #9ec5e8;
+  --info-text: #315b86;
   --shadow: rgba(23, 32, 38, 0.22);
   color: var(--text);
   background: var(--bg);
@@ -40,8 +54,22 @@
   --accent-soft: #23453f;
   --warn: #f2b761;
   --warn-soft: #3a2f1b;
+  --warn-surface: #2d2414;
+  --warn-border: #8f6a22;
+  --warn-text: #ffd88a;
   --danger: #cc5f70;
   --danger-soft: #41232a;
+  --danger-surface: #321a22;
+  --danger-border: #884254;
+  --danger-text: #ffb7c2;
+  --success-soft: #173d37;
+  --success-surface: #122e2b;
+  --success-border: #2f7b70;
+  --success-text: #8de8d4;
+  --info-soft: #18314a;
+  --info-surface: #13263a;
+  --info-border: #315c84;
+  --info-text: #a8d4ff;
   --shadow: rgba(0, 0, 0, 0.48);
 }
 
@@ -315,6 +343,29 @@ h3 {
   margin-bottom: 10px;
 }
 
+.detailHeader {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.detailHeading {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.detailActions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.detailActions .textButton {
+  white-space: nowrap;
+}
+
 .symbolForm {
   align-items: center;
   gap: 8px;
@@ -431,23 +482,23 @@ select {
 }
 
 .pill.bullish {
-  color: #0f4c45;
-  background: #d9eee8;
+  color: var(--success-text);
+  background: var(--success-soft);
 }
 
 .pill.neutral {
-  color: #315b86;
-  background: #dceaf8;
+  color: var(--info-text);
+  background: var(--info-soft);
 }
 
 .pill.bearish {
-  color: #812332;
-  background: #f3dce0;
+  color: var(--danger-text);
+  background: var(--danger-soft);
 }
 
 .pill.caution {
-  color: #87500d;
-  background: #f8e7c1;
+  color: var(--warn-text);
+  background: var(--warn-soft);
 }
 
 .focusGrid {
@@ -579,18 +630,27 @@ select {
 }
 
 .guidanceCard.good {
-  border-color: #9ed6c8;
-  background: #edf8f4;
+  border-color: var(--success-border);
+  color: var(--success-text);
+  background: var(--success-surface);
 }
 
 .guidanceCard.warn {
-  border-color: #e8ce8d;
-  background: #fff8e6;
+  border-color: var(--warn-border);
+  color: var(--warn-text);
+  background: var(--warn-surface);
 }
 
 .guidanceCard.danger {
-  border-color: #e9b8c0;
-  background: #fff0f2;
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+  background: var(--danger-surface);
+}
+
+.guidanceCard.neutral {
+  border-color: var(--info-border);
+  color: var(--info-text);
+  background: var(--info-surface);
 }
 
 .guidanceHeader {
@@ -601,7 +661,8 @@ select {
 
 .guidanceHeader span,
 .guidanceCard dt {
-  color: var(--text-muted);
+  color: currentColor;
+  opacity: 0.72;
   font-size: 0.78rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -628,7 +689,7 @@ select {
   min-width: 0;
   padding: 10px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.65);
+  background: color-mix(in srgb, var(--surface) 54%, transparent);
 }
 
 .metricGrid,
@@ -694,7 +755,7 @@ select {
 .notes p {
   margin-bottom: 0;
   padding-left: 10px;
-  border-left: 3px solid #d69b2f;
+  border-left: 3px solid var(--warn);
   color: var(--text);
 }
 
@@ -769,8 +830,8 @@ select {
 .beginnerSummary {
   padding: 12px;
   border-radius: 8px;
-  background: #eef6fb;
-  color: #244a62;
+  background: var(--info-surface);
+  color: var(--info-text);
   font-weight: 720;
 }
 
@@ -779,27 +840,28 @@ select {
   gap: 4px;
   padding: 12px;
   border-radius: 8px;
-  background: #f2f5f2;
+  color: var(--text);
+  background: var(--surface-muted);
 }
 
 .quickDecision.good {
-  background: #d9eee8;
-  color: #0f4c45;
+  color: var(--success-text);
+  background: var(--success-soft);
 }
 
 .quickDecision.warn {
-  background: #f8e7c1;
-  color: #87500d;
+  color: var(--warn-text);
+  background: var(--warn-soft);
 }
 
 .quickDecision.danger {
-  background: #f3dce0;
-  color: #812332;
+  color: var(--danger-text);
+  background: var(--danger-soft);
 }
 
 .quickDecision.neutral {
-  background: #dceaf8;
-  color: #315b86;
+  color: var(--info-text);
+  background: var(--info-soft);
 }
 
 .tradePlan p,
@@ -819,8 +881,8 @@ select {
 .invalidation {
   padding: 12px;
   border-radius: 8px;
-  background: #f3dce0;
-  color: #812332;
+  background: var(--danger-soft);
+  color: var(--danger-text);
   font-weight: 750;
 }
 
@@ -895,13 +957,13 @@ select {
 
 .headlineList p {
   padding-left: 8px;
-  border-left: 3px solid #176b63;
+  border-left: 3px solid var(--accent);
 }
 
 .contextWarnings p {
   padding-left: 8px;
-  border-left: 3px solid #bd6c15;
-  color: #87500d;
+  border-left: 3px solid var(--warn);
+  color: var(--warn-text);
 }
 
 .journalList article {
@@ -918,6 +980,25 @@ select {
 .decisionCenter {
   display: grid;
   gap: 14px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.sectionHeader h3 {
+  margin-bottom: 0;
+}
+
+.sectionHeader span {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
 }
 
 .verdictCard {
@@ -957,22 +1038,24 @@ select {
 .verdictCard.danger,
 .specialistCard.bearish,
 .safetyList .blocker {
-  border-color: #fecaca;
-  background: #fff1f2;
-  color: #991b1b;
+  border-color: var(--danger-border);
+  background: var(--danger-surface);
+  color: var(--danger-text);
 }
 
 .verdictCard.bullish,
 .specialistCard.bullish {
-  border-color: #bbf7d0;
-  background: #f0fdf4;
+  border-color: var(--success-border);
+  color: var(--success-text);
+  background: var(--success-surface);
 }
 
 .verdictCard.caution,
 .specialistCard.caution,
 .safetyList .warning {
-  border-color: #fde68a;
-  background: #fffbeb;
+  border-color: var(--warn-border);
+  color: var(--warn-text);
+  background: var(--warn-surface);
 }
 
 .scenarioGrid,
@@ -982,14 +1065,106 @@ select {
   gap: 10px;
 }
 
+.strategyGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .scenarioGrid article,
-.specialistCard {
+.specialistCard,
+.strategyCard {
   display: grid;
   gap: 8px;
   padding: 12px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface);
+}
+
+.strategyCard {
+  align-content: start;
+}
+
+.strategyCard.candidate {
+  border-color: var(--success-border);
+  color: var(--success-text);
+  background: var(--success-surface);
+}
+
+.strategyCard.research {
+  border-color: var(--info-border);
+  color: var(--info-text);
+  background: var(--info-surface);
+}
+
+.strategyCard.avoid {
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+  background: var(--danger-surface);
+}
+
+.strategyTopline,
+.strategyMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.strategyTopline span {
+  display: inline-grid;
+  place-items: center;
+  min-width: 30px;
+  height: 26px;
+  border-radius: 999px;
+  color: #ffffff;
+  background: var(--accent);
+  font-weight: 900;
+}
+
+.strategyMeta span,
+.strategyCard small {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.strategyCard p,
+.strategyCard ul {
+  margin: 0;
+}
+
+.strategyCard ul {
+  padding-left: 16px;
+}
+
+.strategyStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.strategyStats span {
+  min-height: 24px;
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--text);
+  background: var(--surface-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.strategyCard li {
+  margin-bottom: 4px;
+}
+
+.strategyCard em {
+  color: var(--danger-text);
+  font-size: 0.8rem;
+  font-style: normal;
 }
 
 .specialistGrid {
@@ -1004,7 +1179,7 @@ select {
 }
 
 .specialistCard em {
-  color: #9f1239;
+  color: var(--danger-text);
   font-style: normal;
   font-size: 0.82rem;
 }
@@ -1027,7 +1202,7 @@ select {
 }
 
 .safetyList.clear {
-  color: #166534;
+  color: var(--success-text);
 }
 
 .safetyControls {
@@ -1143,6 +1318,7 @@ th {
   .focusGrid,
   .scenarioGrid,
   .specialistGrid,
+  .strategyGrid,
   .guidanceCard dl,
   .metricGrid,
   .accountGrid,
@@ -1161,6 +1337,21 @@ th {
 
   .signalCard {
     grid-template-columns: 44px minmax(80px, 1fr) 82px;
+  }
+
+  .detailHeader {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .detailActions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .detailActions .textButton {
+    flex: 1 1 0;
+    min-width: 0;
   }
 
   .signalCard > span:nth-last-child(-n + 2) {

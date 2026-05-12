@@ -13,6 +13,17 @@ export type JournalStatus = "watching" | "paper_open" | "paper_closed" | "skippe
 export type SpecialistKind = "technical" | "market" | "fundamentals" | "options" | "risk" | "journal";
 export type SafetySeverity = "info" | "warning" | "blocker";
 export type AnalysisMode = "fast" | "deep";
+export type StrategyKind =
+  | "long_stock"
+  | "short_stock"
+  | "long_call"
+  | "long_put"
+  | "call_debit_spread"
+  | "put_debit_spread"
+  | "covered_call"
+  | "cash_secured_put"
+  | "watch_only";
+export type StrategySuitability = "candidate" | "watch" | "research" | "avoid";
 
 export interface WatchlistItem {
   symbol: string;
@@ -217,6 +228,26 @@ export interface ManagerVerdict {
   warnings: string[];
 }
 
+export interface StrategyCandidate {
+  kind: StrategyKind;
+  title: string;
+  direction: "bullish" | "bearish" | "neutral" | "income";
+  suitability: StrategySuitability;
+  score: number;
+  summary: string;
+  setup: string[];
+  riskNotes: string[];
+  legs?: string[];
+  netDebit?: number | null;
+  netCredit?: number | null;
+  breakeven?: number | null;
+  representativeContract?: string;
+  estimatedMaxLoss?: number | null;
+  estimatedMaxGain?: number | null;
+  probabilityOfProfit?: number | null;
+  warnings: string[];
+}
+
 export interface AnalysisRun {
   id: string;
   symbol: string;
@@ -227,6 +258,7 @@ export interface AnalysisRun {
   context: TradeContext;
   specialistReports: SpecialistReport[];
   safetyBlockers: SafetyBlocker[];
+  strategyCandidates: StrategyCandidate[];
   managerVerdict: ManagerVerdict;
 }
 
@@ -290,6 +322,16 @@ export interface OptionIdea {
   openInterest: number | null;
   breakeven: number | null;
   maxLoss: number | null;
+  daysToExpiration?: number | null;
+  moneyness?: number | null;
+  intrinsicValue?: number | null;
+  extrinsicValue?: number | null;
+  impliedVolatility?: number | null;
+  delta?: number | null;
+  gamma?: number | null;
+  theta?: number | null;
+  vega?: number | null;
+  probabilityOfProfit?: number | null;
   liquidityWarning: string | null;
 }
 

@@ -8,11 +8,13 @@ import type {
   SafetyBlocker,
   SignalBias,
   SignalSnapshot,
+  StrategyCandidate,
   SpecialistReport,
   TradeContext,
   TradeJournalEntry
 } from "../src/shared/types";
 import { round } from "./indicators";
+import { enrichOptionIdeas, getCashSecuredPutMetrics, getCoveredCallMetrics, getDebitSpreadMetrics } from "./options";
 
 interface BuildAnalysisInput {
   mode: AnalysisMode;
@@ -30,6 +32,7 @@ interface BuildAnalysisInput {
 export function buildAnalysisRun(input: BuildAnalysisInput): AnalysisRun {
   const specialistReports = buildSpecialistReports(input);
   const safetyBlockers = buildSafetyBlockers(input);
+  const strategyCandidates = buildStrategyCandidates(input, safetyBlockers);
   const managerVerdict = input.managerVerdict ?? buildFallbackManagerVerdict(input.snapshot, specialistReports, safetyBlockers);
 
   return {
@@ -42,16 +45,18 @@ export function buildAnalysisRun(input: BuildAnalysisInput): AnalysisRun {
     context: input.context,
     specialistReports,
     safetyBlockers,
+    strategyCandidates,
     managerVerdict
   };
 }
 
 export function buildSpecialistReports(input: BuildAnalysisInput): SpecialistReport[] {
+  const options = enrichOptionIdeas(input.options, input.snapshot.lastPrice);
   return [
     buildTechnicalReport(input.snapshot, input.marketSnapshots),
     buildMarketReport(input.marketSnapshots),
     buildFundamentalsReport(input.context, input.riskSettings),
-    buildOptionsReport(input.options),
+    buildOptionsReport(options),
     buildRiskReport(input.snapshot, input.account, input.positions, input.riskSettings),
     buildJournalReport(input.snapshot.symbol, input.journal)
   ];
@@ -133,6 +138,227 @@ export function buildSafetyBlockers(input: BuildAnalysisInput): SafetyBlocker[] 
   }
 
   return blockers;
+}
+
+export function buildStrategyCandidates(input: BuildAnalysisInput, blockers = buildSafetyBlockers(input)): StrategyCandidate[] {
+  const snapshot = input.snapshot;
+  const options = enrichOptionIdeas(input.options, snapshot.lastPrice);
+  const hardBlock = blockers.some((blocker) => blocker.severity === "blocker");
+  const hasPosition = input.positions.some((position) => getPositionSymbol(position) === snapshot.symbol);
+  const liquidCalls = getLiquidOptions(options, "call");
+  const liquidPuts = getLiquidOptions(options, "put");
+  const bestCall = pickOptionNearPrice(liquidCalls, snapshot.lastPrice, "above");
+  const bestPut = pickOptionNearPrice(liquidPuts, snapshot.lastPrice, "below");
+  const callSpread = getDebitSpreadMetrics({ type: "call", longLeg: liquidCalls[0], shortLeg: liquidCalls[1] });
+  const putSpread = getDebitSpreadMetrics({ type: "put", longLeg: liquidPuts[0], shortLeg: liquidPuts[1] });
+  const coveredCall = getCoveredCallMetrics(snapshot.lastPrice, liquidCalls[0]);
+  const cashSecuredPut = getCashSecuredPutMetrics(bestPut);
+  const bullish = snapshot.bias === "bullish" || snapshot.trend === "uptrend";
+  const bearish = snapshot.bias === "bearish" || snapshot.trend === "downtrend";
+  const rangeBound = snapshot.trend === "range" || snapshot.bias === "neutral";
+  const riskReward = snapshot.riskReward ?? 0;
+  const baseWarnings = hardBlock ? ["Hard safety blockers must be resolved before acting."] : [];
+  const executionWarning = "Research only: this app does not place options or short-sale orders yet.";
+
+  const candidates: StrategyCandidate[] = [
+    {
+      kind: "long_stock",
+      title: "Long stock",
+      direction: "bullish",
+      suitability: hardBlock ? "avoid" : bullish && snapshot.score >= 70 && riskReward >= input.riskSettings.minRiskReward ? "candidate" : "watch",
+      score: clampScore(snapshot.score + (riskReward >= input.riskSettings.minRiskReward ? 8 : -10)),
+      summary: bullish ? "Use shares when trend and risk/reward are strong enough for a defined stop." : "Needs cleaner bullish confirmation before a share entry.",
+      setup: [
+        `Trend: ${snapshot.trend}.`,
+        `Setup score: ${snapshot.score}/100.`,
+        riskReward ? `Risk/reward: ${riskReward}:1.` : "Risk/reward unavailable."
+      ],
+      riskNotes: [
+        snapshot.suggestedStop ? `Stop reference: ${snapshot.suggestedStop}.` : "No stop reference.",
+        snapshot.suggestedTarget ? `Target reference: ${snapshot.suggestedTarget}.` : "No target reference."
+      ],
+      estimatedMaxLoss: snapshot.riskDollars,
+      warnings: baseWarnings
+    },
+    {
+      kind: "short_stock",
+      title: "Short stock",
+      direction: "bearish",
+      suitability: hardBlock ? "avoid" : bearish && snapshot.score <= 45 ? "research" : "watch",
+      score: clampScore(100 - snapshot.score + (bearish ? 12 : -12)),
+      summary: bearish ? "Bearish structure may justify short research, but borrow/margin risk needs separate approval." : "Short side is not favored while price action is not clearly bearish.",
+      setup: [
+        `Trend: ${snapshot.trend}.`,
+        `Bias: ${snapshot.bias}.`,
+        snapshot.sma20 && snapshot.lastPrice ? `Price is ${snapshot.lastPrice > snapshot.sma20 ? "above" : "below"} SMA20.` : "SMA20 comparison unavailable."
+      ],
+      riskNotes: [
+        "Short stock has theoretically uncapped loss.",
+        "Requires borrow availability, margin approval, and separate stop logic."
+      ],
+      estimatedMaxLoss: null,
+      warnings: [...baseWarnings, executionWarning]
+    },
+    {
+      kind: "long_call",
+      title: "Long call",
+      direction: "bullish",
+      suitability: hardBlock ? "avoid" : bestCall && bullish && snapshot.score >= 65 ? "research" : "watch",
+      score: clampScore(snapshot.score + (bestCall ? 5 : -18)),
+      summary: bestCall ? "Bullish defined-risk options exposure using a call contract." : "No liquid call candidate was available from the loaded contracts.",
+      setup: [
+        bestCall ? `Representative call: ${bestCall.symbol}.` : "No representative call.",
+        bestCall ? `Strike ${bestCall.strikePrice}, exp ${bestCall.expirationDate}.` : "Load option contracts for better comparison.",
+        snapshot.rsi14 !== null ? `RSI: ${snapshot.rsi14}.` : "RSI unavailable."
+      ],
+      riskNotes: [
+        "Max loss is the premium paid.",
+        "Time decay can hurt even if the stock direction is right.",
+        bestCall?.impliedVolatility ? `Estimated IV: ${formatPercent(bestCall.impliedVolatility)}.` : "Estimated IV unavailable."
+      ],
+      representativeContract: bestCall?.symbol,
+      estimatedMaxLoss: bestCall?.maxLoss ?? null,
+      breakeven: bestCall?.breakeven ?? null,
+      probabilityOfProfit: bestCall?.probabilityOfProfit ?? null,
+      warnings: [...baseWarnings, executionWarning]
+    },
+    {
+      kind: "long_put",
+      title: "Long put",
+      direction: "bearish",
+      suitability: hardBlock ? "avoid" : bestPut && bearish ? "research" : "watch",
+      score: clampScore(100 - snapshot.score + (bestPut && bearish ? 18 : bestPut ? 2 : -18)),
+      summary: bestPut ? "Bearish defined-risk options exposure using a put contract." : "No liquid put candidate was available from the loaded contracts.",
+      setup: [
+        bestPut ? `Representative put: ${bestPut.symbol}.` : "No representative put.",
+        bestPut ? `Strike ${bestPut.strikePrice}, exp ${bestPut.expirationDate}.` : "Load option contracts for better comparison.",
+        `Bias: ${snapshot.bias}.`
+      ],
+      riskNotes: [
+        "Max loss is the premium paid.",
+        "Needs enough downside move before expiration to offset premium decay.",
+        bestPut?.impliedVolatility ? `Estimated IV: ${formatPercent(bestPut.impliedVolatility)}.` : "Estimated IV unavailable."
+      ],
+      representativeContract: bestPut?.symbol,
+      estimatedMaxLoss: bestPut?.maxLoss ?? null,
+      breakeven: bestPut?.breakeven ?? null,
+      probabilityOfProfit: bestPut?.probabilityOfProfit ?? null,
+      warnings: [...baseWarnings, executionWarning]
+    },
+    {
+      kind: "call_debit_spread",
+      title: "Call debit spread",
+      direction: "bullish",
+      suitability: hardBlock ? "avoid" : liquidCalls.length >= 2 && bullish ? "research" : "watch",
+      score: clampScore(snapshot.score + (liquidCalls.length >= 2 ? 2 : -15)),
+      summary: "Bullish defined-risk spread idea that may reduce premium versus a single call.",
+      setup: getSpreadSetup(liquidCalls, "call"),
+      riskNotes: [
+        "Defined risk, defined reward.",
+        callSpread.netDebit !== null ? `Estimated debit: ${callSpread.netDebit}.` : "Spread debit unavailable."
+      ],
+      representativeContract: liquidCalls[0]?.symbol,
+      legs: getSpreadLegs(liquidCalls),
+      netDebit: callSpread.netDebit,
+      breakeven: callSpread.breakeven,
+      estimatedMaxLoss: callSpread.maxLoss,
+      estimatedMaxGain: callSpread.maxGain,
+      probabilityOfProfit: callSpread.probabilityOfProfit,
+      warnings: [...baseWarnings, executionWarning]
+    },
+    {
+      kind: "put_debit_spread",
+      title: "Put debit spread",
+      direction: "bearish",
+      suitability: hardBlock ? "avoid" : liquidPuts.length >= 2 && bearish ? "research" : "watch",
+      score: clampScore(100 - snapshot.score + (liquidPuts.length >= 2 && bearish ? 12 : 0)),
+      summary: "Bearish defined-risk spread idea that may reduce premium versus a single put.",
+      setup: getSpreadSetup(liquidPuts, "put"),
+      riskNotes: [
+        "Defined risk, defined reward.",
+        putSpread.netDebit !== null ? `Estimated debit: ${putSpread.netDebit}.` : "Spread debit unavailable."
+      ],
+      representativeContract: liquidPuts[0]?.symbol,
+      legs: getSpreadLegs(liquidPuts),
+      netDebit: putSpread.netDebit,
+      breakeven: putSpread.breakeven,
+      estimatedMaxLoss: putSpread.maxLoss,
+      estimatedMaxGain: putSpread.maxGain,
+      probabilityOfProfit: putSpread.probabilityOfProfit,
+      warnings: [...baseWarnings, executionWarning]
+    },
+    {
+      kind: "covered_call",
+      title: "Covered call",
+      direction: "income",
+      suitability: hardBlock ? "avoid" : hasPosition && liquidCalls.length ? "research" : "watch",
+      score: clampScore((hasPosition ? 55 : 35) + (rangeBound ? 15 : 0) + (liquidCalls.length ? 8 : -10)),
+      summary: hasPosition ? "Income idea for an existing share position." : "Requires owning shares first; useful mainly for income or exit planning.",
+      setup: [
+        hasPosition ? "Existing position detected." : "No existing paper position detected.",
+        liquidCalls[0] ? `Reference call: ${liquidCalls[0].symbol}.` : "No liquid call candidate.",
+        rangeBound ? "Range-bound conditions may fit income research." : "Strong directional trends can make call-away risk more important."
+      ],
+      riskNotes: [
+        "Caps upside above the short call strike.",
+        "Shares still carry downside risk."
+      ],
+      representativeContract: liquidCalls[0]?.symbol,
+      netCredit: coveredCall.netCredit,
+      breakeven: coveredCall.breakeven,
+      estimatedMaxLoss: coveredCall.maxLoss,
+      estimatedMaxGain: coveredCall.maxGain,
+      probabilityOfProfit: coveredCall.probabilityOfProfit,
+      warnings: [...baseWarnings, executionWarning]
+    },
+    {
+      kind: "cash_secured_put",
+      title: "Cash-secured put",
+      direction: "income",
+      suitability: hardBlock ? "avoid" : bestPut && (bullish || rangeBound) ? "research" : "watch",
+      score: clampScore((bullish || rangeBound ? 58 : 35) + (bestPut ? 8 : -12)),
+      summary: "Income or entry strategy if you are willing to buy shares at the strike.",
+      setup: [
+        bestPut ? `Reference put: ${bestPut.symbol}.` : "No representative put.",
+        bestPut ? `Potential assignment near ${bestPut.strikePrice}.` : "Load put contracts for assignment levels.",
+        `Current trend: ${snapshot.trend}.`
+      ],
+      riskNotes: [
+        "Requires cash to buy 100 shares per contract if assigned.",
+        "Downside can resemble owning shares from the strike less premium."
+      ],
+      representativeContract: bestPut?.symbol,
+      netCredit: cashSecuredPut.netCredit,
+      breakeven: cashSecuredPut.breakeven,
+      estimatedMaxLoss: cashSecuredPut.maxLoss,
+      estimatedMaxGain: cashSecuredPut.maxGain,
+      probabilityOfProfit: cashSecuredPut.probabilityOfProfit,
+      warnings: [...baseWarnings, executionWarning]
+    },
+    {
+      kind: "watch_only",
+      title: "Watch only",
+      direction: "neutral",
+      suitability: hardBlock || snapshot.score < 65 || riskReward < input.riskSettings.minRiskReward ? "candidate" : "watch",
+      score: clampScore(100 - Math.abs(snapshot.score - 50)),
+      summary: "No-trade is a valid position when the setup is mixed, stale, event-heavy, or low reward.",
+      setup: [
+        `Score: ${snapshot.score}/100.`,
+        `Trend: ${snapshot.trend}.`,
+        riskReward ? `Risk/reward: ${riskReward}:1.` : "Risk/reward unavailable."
+      ],
+      riskNotes: [
+        "Preserves buying power.",
+        "Wait for cleaner confirmation or a better price."
+      ],
+      warnings: baseWarnings
+    }
+  ];
+
+  return candidates.sort((left, right) => {
+    const suitabilityRank = { candidate: 3, research: 2, watch: 1, avoid: 0 };
+    return suitabilityRank[right.suitability] - suitabilityRank[left.suitability] || right.score - left.score;
+  });
 }
 
 export function buildFallbackManagerVerdict(
@@ -332,6 +558,46 @@ function getPositionSymbol(position: unknown): string | null {
   if (!position || typeof position !== "object") return null;
   const value = (position as { symbol?: unknown }).symbol;
   return typeof value === "string" ? value.toUpperCase() : null;
+}
+
+function getLiquidOptions(options: OptionIdea[], type: "call" | "put"): OptionIdea[] {
+  return options
+    .filter((option) => option.type === type && !option.liquidityWarning && (option.openInterest ?? 0) >= 100)
+    .sort((left, right) => {
+      const leftExpiry = new Date(left.expirationDate).getTime();
+      const rightExpiry = new Date(right.expirationDate).getTime();
+      return leftExpiry - rightExpiry || left.strikePrice - right.strikePrice;
+    });
+}
+
+function pickOptionNearPrice(options: OptionIdea[], price: number | null, side: "above" | "below"): OptionIdea | undefined {
+  if (!options.length) return undefined;
+  if (!price) return options[0];
+  const filtered = options.filter((option) => side === "above" ? option.strikePrice >= price : option.strikePrice <= price);
+  return (filtered.length ? filtered : options).sort((left, right) => Math.abs(left.strikePrice - price) - Math.abs(right.strikePrice - price))[0];
+}
+
+function getSpreadSetup(options: OptionIdea[], type: "call" | "put"): string[] {
+  if (options.length < 2) return [`Not enough liquid ${type} contracts to sketch a spread.`];
+  const first = options[0];
+  const second = options[1];
+  return [
+    `Reference long leg: ${first.symbol}.`,
+    `Reference short leg: ${second.symbol}.`,
+    `Strikes: ${first.strikePrice} / ${second.strikePrice}.`
+  ];
+}
+
+function getSpreadLegs(options: OptionIdea[]): string[] {
+  return options.slice(0, 2).map((option, index) => `${index === 0 ? "Long" : "Short"} ${option.symbol}`);
+}
+
+function formatPercent(value: number): string {
+  return `${round(value * 100, 1)}%`;
+}
+
+function clampScore(value: number): number {
+  return Math.max(0, Math.min(100, Math.round(value)));
 }
 
 function getPercentChange(bars: SignalSnapshot["bars"], lookback: number): number {

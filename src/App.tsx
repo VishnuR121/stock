@@ -542,19 +542,21 @@ export function App() {
 
           <section className="focusGrid">
             <section className="panel detailPanel">
-              <div className="panelTitle spaced">
-                <div>
+              <div className="panelTitle spaced detailHeader">
+                <div className="detailHeading">
                   <h2>{activeSignal?.symbol ?? "Symbol detail"}</h2>
                   <p>{activeSignal ? `${activeSignal.trend} - ${activeSignal.bias}` : "Select a ticker"}</p>
                 </div>
-                <button className="textButton" onClick={generateTradePlan} disabled={!activeSignal || busy === "ai"}>
-                  {busy === "ai" ? <Loader2 className="spin" size={17} /> : <Bot size={17} />}
-                  <span>{activeSignal && activePlanRecord ? "Refresh plan" : "AI plan"}</span>
-                </button>
-                <button className="textButton secondary" onClick={generateAnalysisRun} disabled={!activeSignal || busy === "analysis"}>
-                  {busy === "analysis" ? <Loader2 className="spin" size={17} /> : <ShieldCheck size={17} />}
-                  <span>Decision Center</span>
-                </button>
+                <div className="detailActions">
+                  <button className="textButton" onClick={generateTradePlan} disabled={!activeSignal || busy === "ai"}>
+                    {busy === "ai" ? <Loader2 className="spin" size={17} /> : <Bot size={17} />}
+                    <span>{activeSignal && activePlanRecord ? "Refresh plan" : "AI plan"}</span>
+                  </button>
+                  <button className="textButton secondary" onClick={generateAnalysisRun} disabled={!activeSignal || busy === "analysis"}>
+                    {busy === "analysis" ? <Loader2 className="spin" size={17} /> : <ShieldCheck size={17} />}
+                    <span>Decision Center</span>
+                  </button>
+                </div>
               </div>
 
               {activeSignal ? (
@@ -934,6 +936,8 @@ function DecisionCenter({ analysis }: { analysis: AnalysisRun }) {
 
       <SafetyBlockerList blockers={analysis.safetyBlockers} />
 
+      <StrategyCandidateList candidates={analysis.strategyCandidates ?? []} />
+
       <div className="scenarioGrid">
         {analysis.managerVerdict.scenarios.map((scenario) => (
           <article key={scenario.label}>
@@ -962,6 +966,52 @@ function DecisionCenter({ analysis }: { analysis: AnalysisRun }) {
       {analysis.managerVerdict.dissent.length > 0 && <ListBlock title="Disagreement" items={analysis.managerVerdict.dissent} />}
       <p className="invalidation">{analysis.managerVerdict.invalidation}</p>
     </article>
+  );
+}
+
+function StrategyCandidateList({ candidates }: { candidates: AnalysisRun["strategyCandidates"] }) {
+  if (!candidates.length) return null;
+
+  return (
+    <section className="strategySection" aria-label="Position ideas">
+      <div className="sectionHeader">
+        <h3>Position ideas</h3>
+        <span>Research, compare, then choose manually</span>
+      </div>
+      <div className="strategyGrid">
+        {candidates.slice(0, 6).map((candidate) => (
+          <article key={candidate.kind} className={`strategyCard ${candidate.suitability}`}>
+            <div className="strategyTopline">
+              <strong>{candidate.title}</strong>
+              <span>{candidate.score}</span>
+            </div>
+            <div className="strategyMeta">
+              <span>{candidate.direction}</span>
+              <span>{candidate.suitability}</span>
+            </div>
+            <p>{candidate.summary}</p>
+            {candidate.representativeContract && <small>{candidate.representativeContract}</small>}
+            <div className="strategyStats">
+              {typeof candidate.netDebit === "number" && <span>Debit {formatCurrency(candidate.netDebit)}</span>}
+              {typeof candidate.netCredit === "number" && <span>Credit {formatCurrency(candidate.netCredit)}</span>}
+              {typeof candidate.breakeven === "number" && <span>BE {formatCurrency(candidate.breakeven)}</span>}
+              {typeof candidate.estimatedMaxLoss === "number" && <span>Max loss {formatCurrency(candidate.estimatedMaxLoss)}</span>}
+              {typeof candidate.estimatedMaxGain === "number" && <span>Max gain {formatCurrency(candidate.estimatedMaxGain)}</span>}
+              {typeof candidate.probabilityOfProfit === "number" && <span>POP {formatPct(candidate.probabilityOfProfit)}</span>}
+            </div>
+            {candidate.legs && candidate.legs.length > 0 && (
+              <small>{candidate.legs.join(" / ")}</small>
+            )}
+            <ul>
+              {candidate.riskNotes.slice(0, 2).map((note) => (
+                <li key={note}>{note}</li>
+              ))}
+            </ul>
+            {candidate.warnings[0] && <em>{candidate.warnings[0]}</em>}
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1170,7 +1220,9 @@ function OptionsTable({ options }: { options: OptionIdea[] }) {
             <th>Type</th>
             <th>Exp</th>
             <th>Strike</th>
-            <th>Max loss</th>
+            <th>IV</th>
+            <th>Delta</th>
+            <th>POP</th>
           </tr>
         </thead>
         <tbody>
@@ -1180,7 +1232,9 @@ function OptionsTable({ options }: { options: OptionIdea[] }) {
               <td>{option.type}</td>
               <td>{option.expirationDate}</td>
               <td>{formatCurrency(option.strikePrice)}</td>
-              <td>{formatCurrency(option.maxLoss)}</td>
+              <td>{formatOptionalPct(option.impliedVolatility)}</td>
+              <td>{formatNumber(option.delta)}</td>
+              <td>{formatOptionalPct(option.probabilityOfProfit)}</td>
             </tr>
           ))}
         </tbody>
@@ -1328,6 +1382,14 @@ function formatCurrency(value?: number | null): string {
 
 function formatPct(value: number): string {
   return `${Math.round(value * 10000) / 100}%`;
+}
+
+function formatOptionalPct(value?: number | null): string {
+  return typeof value === "number" && Number.isFinite(value) ? formatPct(value) : "--";
+}
+
+function formatNumber(value?: number | null): string {
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : "--";
 }
 
 function getErrorMessage(error: unknown): string {

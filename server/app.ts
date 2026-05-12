@@ -7,6 +7,7 @@ import { getConfig, isPaperAlpacaUrl, type AppConfig } from "./config";
 import { TradeContextService } from "./context";
 import { buildSignalSnapshot, getDefaultRiskProfile } from "./indicators";
 import { OpenAiTradePlanner } from "./openai";
+import { enrichOptionIdeas } from "./options";
 import { createStore, getStoreDescription } from "./storeFactory";
 import type { AppStore } from "./storage";
 import { normalizeSymbol, paperOrderSchema, validatePaperOrder, watchlistItemSchema } from "./validation";
@@ -105,8 +106,11 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
 
   app.get("/api/options/:symbol", asyncHandler(async (request, response) => {
     const symbol = normalizeSymbol(request.params.symbol);
-    const ideas = await alpaca.getOptionIdeas(symbol);
-    response.json({ symbol, ideas });
+    const [ideas, bars] = await Promise.all([
+      alpaca.getOptionIdeas(symbol),
+      alpaca.getBars(symbol, 5).catch(() => [])
+    ]);
+    response.json({ symbol, ideas: enrichOptionIdeas(ideas, bars.at(-1)?.close ?? null) });
   }));
 
   app.get("/api/context/:symbol", asyncHandler(async (request, response) => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSafetyBlockers, buildSpecialistReports } from "../server/analysis";
+import { buildSafetyBlockers, buildSpecialistReports, buildStrategyCandidates } from "../server/analysis";
 import { getDefaultRiskSettings } from "../server/storage";
 import type { SignalSnapshot, TradeContext } from "../src/shared/types";
 
@@ -35,6 +35,62 @@ describe("V2 analysis reports", () => {
 
     expect(reports.map((report) => report.kind)).toEqual(["technical", "market", "fundamentals", "options", "risk", "journal"]);
     expect(reports.find((report) => report.kind === "risk")?.warnings.join(" ")).toMatch(/Existing position/);
+  });
+
+  it("generates multiple strategy candidates beyond long stock", () => {
+    const candidates = buildStrategyCandidates({
+      mode: "fast",
+      snapshot: makeSnapshot(),
+      context: makeContext(),
+      options: [
+        {
+          symbol: "AAPL260619C00145000",
+          underlyingSymbol: "AAPL",
+          type: "call",
+          expirationDate: "2026-06-19",
+          strikePrice: 145,
+          closePrice: 4.5,
+          openInterest: 250,
+          breakeven: 149.5,
+          maxLoss: 450,
+          liquidityWarning: null
+        },
+        {
+          symbol: "AAPL260619C00150000",
+          underlyingSymbol: "AAPL",
+          type: "call",
+          expirationDate: "2026-06-19",
+          strikePrice: 150,
+          closePrice: 2.8,
+          openInterest: 180,
+          breakeven: 152.8,
+          maxLoss: 280,
+          liquidityWarning: null
+        },
+        {
+          symbol: "AAPL260619P00135000",
+          underlyingSymbol: "AAPL",
+          type: "put",
+          expirationDate: "2026-06-19",
+          strikePrice: 135,
+          closePrice: 3.1,
+          openInterest: 220,
+          breakeven: 131.9,
+          maxLoss: 310,
+          liquidityWarning: null
+        }
+      ],
+      account: { equity: 100000 },
+      positions: [],
+      journal: [],
+      riskSettings: getDefaultRiskSettings(),
+      marketSnapshots: []
+    });
+
+    expect(candidates.map((candidate) => candidate.kind)).toContain("long_stock");
+    expect(candidates.map((candidate) => candidate.kind)).toContain("long_call");
+    expect(candidates.map((candidate) => candidate.kind)).toContain("cash_secured_put");
+    expect(candidates.some((candidate) => candidate.warnings.join(" ").includes("Research only"))).toBe(true);
   });
 });
 
