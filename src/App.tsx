@@ -24,6 +24,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import type {
   AlgoTradeProposal,
   AnalysisRun,
+  BacktestResult,
   BrokerAccountSnapshot,
   EnrichedTradePlanResponse,
   HealthStatus,
@@ -66,8 +67,17 @@ type BeginnerAction = {
 };
 type ThemeMode = "light" | "dark";
 type AnalysisView = "decision" | "plan";
-type WorkspaceView = "overview" | "research" | "algo" | "positions" | "orders" | "account";
+type WorkspaceView = "overview" | "research" | "backtests" | "algo" | "positions" | "orders" | "account";
 type AlgoQueueFilter = "active" | "selected" | "all" | "history";
+
+type BacktestForm = {
+  symbols: string;
+  startDate: string;
+  endDate: string;
+  holdingPeriodDays: number;
+  maxPositions: number;
+  minScore: number;
+};
 
 const emptyOrder: PaperOrderRequest = {
   symbol: "",
@@ -81,6 +91,15 @@ const emptyOrder: PaperOrderRequest = {
   earningsChecked: false,
   confirmedPaperOnly: false,
   acceptedRisk: false
+};
+
+const defaultBacktestForm: BacktestForm = {
+  symbols: "SPY, QQQ, AAPL, MSFT",
+  startDate: "2025-01-01",
+  endDate: "2025-12-31",
+  holdingPeriodDays: 10,
+  maxPositions: 3,
+  minScore: 70
 };
 
 export function App() {
@@ -111,6 +130,8 @@ export function App() {
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("overview");
   const [algoQueueFilter, setAlgoQueueFilter] = useState<AlgoQueueFilter>("active");
   const [algoSearch, setAlgoSearch] = useState("");
+  const [backtestForm, setBacktestForm] = useState<BacktestForm>(defaultBacktestForm);
+  const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
 
   useEffect(() => {
     void refreshBasics();
@@ -668,6 +689,30 @@ export function App() {
     }
   }
 
+  async function runBacktest() {
+    setBusy("backtest");
+    setMessage(null);
+    try {
+      const result = await api<BacktestResult>("/api/backtest", {
+        method: "POST",
+        body: JSON.stringify({
+          symbols: backtestForm.symbols.split(",").map((symbol) => symbol.trim()).filter(Boolean),
+          startDate: backtestForm.startDate,
+          endDate: backtestForm.endDate,
+          holdingPeriodDays: backtestForm.holdingPeriodDays,
+          maxPositions: backtestForm.maxPositions,
+          minScore: backtestForm.minScore
+        })
+      });
+      setBacktestResult(result);
+      setMessage(`Backtest complete: ${result.numberOfTrades} trades.`);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function closeMonitoredPosition(position: MonitoredPosition) {
     const confirm = window.prompt(`Type CLOSE PAPER POSITION to close ${position.symbol}.`);
     if (confirm !== "CLOSE PAPER POSITION") return;
@@ -1043,6 +1088,18 @@ export function App() {
             </div>
           )}
 
+          {workspaceView === "backtests" && (
+            <div className="tabSurface">
+              <BacktestsPanel
+                form={backtestForm}
+                result={backtestResult}
+                busy={busy}
+                onChange={setBacktestForm}
+                onRun={runBacktest}
+              />
+            </div>
+          )}
+
           {workspaceView === "algo" && (
             <div className="tabSurface">
               <AlgoCommandCenter
@@ -1160,6 +1217,7 @@ function WorkspaceTabs({
   const tabs: Array<{ view: WorkspaceView; label: string; icon: JSX.Element }> = [
     { view: "overview", label: "Overview", icon: <Activity size={16} /> },
     { view: "research", label: "Research", icon: <Target size={16} /> },
+    { view: "backtests", label: "Backtests", icon: <BarChart3 size={16} /> },
     { view: "algo", label: "Algo", icon: <Bot size={16} /> },
     { view: "positions", label: "Positions", icon: <LineChart size={16} /> },
     { view: "orders", label: "Orders", icon: <ClipboardCheck size={16} /> },
@@ -1449,6 +1507,175 @@ function OpportunityFinderPanel({
               ))}
             </div>
           )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function BacktestsPanel({
+  form,
+  result,
+  busy,
+  onChange,
+  onRun
+}: {
+  form: BacktestForm;
+  result: BacktestResult | null;
+  busy: string | null;
+  onChange: (next: BacktestForm | ((current: BacktestForm) => BacktestForm)) => void;
+  onRun: () => void;
+}) {
+  const update = (patch: Partial<BacktestForm>) => onChange((current) => ({ ...current, ...patch }));
+  const latestCurve = result?.equityCurve.slice(-8) ?? [];
+  const trades = result?.trades.slice(0, 12) ?? [];
+
+  return (
+    <section className="panel backtestPanel" aria-label="Backtests">
+      <div className="panelTitle spaced">
+        <div>
+          <h2>Backtests</h2>
+          <p>Long-only swing test using historical bars. Signals use only past data and enter on the next bar.</p>
+        </div>
+        <button className="textButton" onClick={onRun} disabled={busy === "backtest"}>
+          {busy === "backtest" ? <Loader2 className="spin" size={17} /> : <BarChart3 size={17} />}
+          <span>Run backtest</span>
+        </button>
+      </div>
+
+      <div className="backtestForm">
+        <label>
+          <span>Symbols</span>
+          <input value={form.symbols} onChange={(event) => update({ symbols: event.target.value })} />
+        </label>
+        <label>
+          <span>Start</span>
+          <input type="date" value={form.startDate} onChange={(event) => update({ startDate: event.target.value })} />
+        </label>
+        <label>
+          <span>End</span>
+          <input type="date" value={form.endDate} onChange={(event) => update({ endDate: event.target.value })} />
+        </label>
+        <label>
+          <span>Holding days</span>
+          <input type="number" min="1" max="60" value={form.holdingPeriodDays} onChange={(event) => update({ holdingPeriodDays: Number(event.target.value) })} />
+        </label>
+        <label>
+          <span>Max positions</span>
+          <input type="number" min="1" max="20" value={form.maxPositions} onChange={(event) => update({ maxPositions: Number(event.target.value) })} />
+        </label>
+        <label>
+          <span>Min score</span>
+          <input type="number" min="1" max="100" value={form.minScore} onChange={(event) => update({ minScore: Number(event.target.value) })} />
+        </label>
+      </div>
+
+      {!result ? (
+        <EmptyState text="Run a backtest to compare the strategy against SPY." />
+      ) : (
+        <>
+          <section className="backtestMetrics" aria-label="Backtest summary">
+            <article>
+              <span>Total return</span>
+              <strong>{formatPctPoints(result.totalReturnPct)}</strong>
+            </article>
+            <article>
+              <span>Annualized</span>
+              <strong>{result.annualizedReturnPct === null ? "--" : formatPctPoints(result.annualizedReturnPct)}</strong>
+            </article>
+            <article>
+              <span>Win rate</span>
+              <strong>{formatPctPoints(result.winRate)}</strong>
+            </article>
+            <article>
+              <span>Max drawdown</span>
+              <strong>{formatPctPoints(result.maxDrawdownPct)}</strong>
+            </article>
+            <article>
+              <span>Trades</span>
+              <strong>{result.numberOfTrades}</strong>
+            </article>
+            <article>
+              <span>SPY benchmark</span>
+              <strong>{result.benchmarkReturnPct === null ? "--" : formatPctPoints(result.benchmarkReturnPct)}</strong>
+            </article>
+          </section>
+
+          {result.warnings.length > 0 && (
+            <div className="contextWarnings">
+              {result.warnings.map((warning) => (
+                <p key={warning}>{warning}</p>
+              ))}
+            </div>
+          )}
+
+          <div className="backtestTables">
+            <section>
+              <div className="sectionHeader">
+                <h3>Equity Curve</h3>
+                <span>Latest points</span>
+              </div>
+              <div className="tableWrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Equity</th>
+                      <th>SPY</th>
+                      <th>Drawdown</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {latestCurve.map((point) => (
+                      <tr key={point.date}>
+                        <td>{point.date}</td>
+                        <td>{formatCurrency(point.equity)}</td>
+                        <td>{formatCurrency(point.benchmarkEquity)}</td>
+                        <td>{formatPctPoints(point.drawdownPct)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section>
+              <div className="sectionHeader">
+                <h3>Trades</h3>
+                <span>{result.trades.length} total</span>
+              </div>
+              {!trades.length ? (
+                <EmptyState text="No trades met the filters." />
+              ) : (
+                <div className="tableWrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Symbol</th>
+                        <th>Entry</th>
+                        <th>Exit</th>
+                        <th>P/L</th>
+                        <th>R</th>
+                        <th>Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {trades.map((trade) => (
+                        <tr key={trade.id}>
+                          <td>{trade.symbol}</td>
+                          <td>{trade.entryDate} @ {formatCurrency(trade.entryPrice)}</td>
+                          <td>{trade.exitDate} @ {formatCurrency(trade.exitPrice)}</td>
+                          <td>{formatCurrency(trade.pnl)}</td>
+                          <td>{trade.rMultiple}</td>
+                          <td>{trade.exitReason.replaceAll("_", " ")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          </div>
         </>
       )}
     </section>
@@ -2442,6 +2669,10 @@ function formatCurrency(value?: number | null): string {
 
 function formatPct(value: number): string {
   return `${Math.round(value * 10000) / 100}%`;
+}
+
+function formatPctPoints(value: number): string {
+  return `${Math.round(value * 100) / 100}%`;
 }
 
 function formatRegimeLabel(value: MarketRegimeSnapshot["regime"]): string {

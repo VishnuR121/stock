@@ -347,7 +347,7 @@ h3 {
   top: 0;
   z-index: 5;
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 6px;
   padding: 6px;
   border: 1px solid var(--border);
@@ -404,6 +404,57 @@ h3 {
 .accountSurface {
   grid-template-columns: minmax(0, 0.85fr) minmax(340px, 0.6fr);
   align-items: start;
+}
+
+.backtestPanel {
+  display: grid;
+  gap: 14px;
+}
+
+.backtestForm {
+  display: grid;
+  grid-template-columns: minmax(240px, 1.5fr) repeat(5, minmax(120px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.backtestForm label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.backtestForm span,
+.backtestMetrics span {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.backtestMetrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.backtestMetrics article {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.backtestMetrics strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 1.05rem;
+}
+
+.backtestTables {
+  display: grid;
+  gap: 14px;
 }
 
 .commandPanel {
@@ -1941,7 +1992,9 @@ th {
   .twoColumnSurface,
   .researchDetailGrid,
   .accountSurface,
-  .overviewMetrics {
+  .overviewMetrics,
+  .backtestForm,
+  .backtestMetrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -2003,6 +2056,8 @@ th {
   .metricGrid,
   .accountGrid,
   .orderForm,
+  .backtestForm,
+  .backtestMetrics,
   .reviewList {
     grid-template-columns: 1fr;
   }

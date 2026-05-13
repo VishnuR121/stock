@@ -71,6 +71,9 @@ describe("dashboard", () => {
           components: []
         });
       }
+      if (target.endsWith("/api/backtest")) {
+        return jsonResponse(makeBacktestResult());
+      }
       if (target.endsWith("/api/algo/proposals")) {
         return jsonResponse(algoProposals);
       }
@@ -98,6 +101,7 @@ describe("dashboard", () => {
     expect((await screen.findAllByText("SPY")).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /^Overview$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Research$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Backtests$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Orders$/i })).toBeInTheDocument();
     expect(screen.getByText("Today")).toBeInTheDocument();
     expect(await screen.findByText("Market regime")).toBeInTheDocument();
@@ -109,6 +113,21 @@ describe("dashboard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Algo$/i }));
     expect(screen.getByText("Algo Command Center")).toBeInTheDocument();
+  });
+
+  it("runs a backtest and renders summary results", async () => {
+    render(<App />);
+
+    await screen.findAllByText("SPY");
+    fireEvent.click(screen.getByRole("button", { name: /^Backtests$/i }));
+    expect(screen.getByText("Long-only swing test using historical bars. Signals use only past data and enter on the next bar.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Run backtest$/i }));
+
+    expect(await screen.findByText("Backtest complete: 1 trades.")).toBeInTheDocument();
+    expect(screen.getByText("Total return")).toBeInTheDocument();
+    expect(screen.getByText("AAPL")).toBeInTheDocument();
+    expect(screen.getByText("target")).toBeInTheDocument();
   });
 
   it("loads an opportunity candidate and can add it to the watchlist", async () => {
@@ -299,4 +318,63 @@ function makeAlgoProposals(): AlgoTradeProposal[] {
       acceptedRisk: true
     }
   }));
+}
+
+function makeBacktestResult() {
+  return {
+    generatedAt: "2026-05-13T14:00:00.000Z",
+    request: {
+      symbols: ["AAPL"],
+      startDate: "2025-01-01",
+      endDate: "2025-12-31",
+      holdingPeriodDays: 10,
+      maxPositions: 3,
+      minScore: 70,
+      initialEquity: 100000
+    },
+    totalReturnPct: 4.25,
+    annualizedReturnPct: 4.4,
+    winRate: 100,
+    averageWin: 425,
+    averageLoss: 0,
+    maxDrawdownPct: -1.2,
+    numberOfTrades: 1,
+    profitFactor: null,
+    benchmarkReturnPct: 3.1,
+    warnings: [],
+    equityCurve: [
+      {
+        date: "2025-12-30",
+        equity: 104000,
+        benchmarkEquity: 103000,
+        drawdownPct: -0.2
+      },
+      {
+        date: "2025-12-31",
+        equity: 104250,
+        benchmarkEquity: 103100,
+        drawdownPct: 0
+      }
+    ],
+    trades: [
+      {
+        id: "bt-aapl",
+        symbol: "AAPL",
+        side: "long",
+        entryDate: "2025-03-01",
+        exitDate: "2025-03-10",
+        entryPrice: 100,
+        exitPrice: 108.5,
+        quantity: 50,
+        stopLossPrice: 95,
+        targetPrice: 108.5,
+        entryScore: 82,
+        exitReason: "target",
+        pnl: 425,
+        pnlPct: 8.5,
+        rMultiple: 1.7,
+        riskDollars: 250
+      }
+    ]
+  };
 }
