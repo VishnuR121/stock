@@ -1,4 +1,4 @@
-import type { ManagerVerdict, SafetyBlocker, SignalSnapshot, SpecialistReport, TradeContext, TradePlan } from "../src/shared/types";
+import type { DeterministicTradePlan, ManagerVerdict, SafetyBlocker, SignalSnapshot, SpecialistReport, TradeContext, TradePlan } from "../src/shared/types";
 import type { AppConfig } from "./config";
 
 interface AnthropicMessageResult {
@@ -107,16 +107,17 @@ export class AnthropicTradePlanner {
     return Boolean(this.config.anthropicApiKey);
   }
 
-  async createTradePlan(snapshot: SignalSnapshot, context: TradeContext, userNotes?: string): Promise<TradePlan> {
+  async createTradePlan(snapshot: SignalSnapshot, context: TradeContext, userNotes?: string, quantitativePlan?: DeterministicTradePlan): Promise<TradePlan> {
     return this.requestTool<TradePlan>({
       toolName: "emit_trade_plan",
       toolDescription: "Return the structured paper-trade research plan.",
       schema: TRADE_PLAN_SCHEMA,
       system:
-        "You are a conservative swing-trading research assistant for a beginner. You do not provide financial advice or guarantees. Use the provided technical, earnings, news, filing, and fundamental context. Start with plain-English meaning and practical paper-trading guidance, then keep the technical thesis, risk, and checklist concise. Clearly distinguish avoid, watch, paper long candidate, paper short candidate, and options research only. Never recommend live-money execution.",
+        "You are a conservative swing-trading research assistant for a beginner. You do not provide financial advice or guarantees. Explain the provided deterministic quantitative plan; do not invent different entry, stop, target, sizing, action, or bias. Use the provided technical, earnings, news, filing, and fundamental context. Start with plain-English meaning and practical paper-trading guidance, then keep the technical thesis, risk, and checklist concise. Clearly distinguish avoid, watch, paper long candidate, paper short candidate, and options research only. Never recommend live-money execution.",
       userPayload: {
-        task: "Create a structured paper-trade research plan for this technical snapshot. The summary should be understandable to someone new to markets, while the thesis and risk sections may include technical detail.",
+        task: "Create a structured paper-trade research explanation for this deterministic quantitative plan. Match the quantitative plan action, bias, entry zone, stop, targets, sizing, and warnings. If context conflicts with the quantitative plan, explain the conflict and choose watch or avoid.",
         snapshot: compactSnapshot(snapshot),
+        quantitativePlan: quantitativePlan ? compactQuantPlan(quantitativePlan) : undefined,
         context: compactContext(context),
         userNotes
       }
@@ -223,5 +224,41 @@ function compactContext(context: TradeContext) {
     recentFilings: context.recentFilings.slice(0, 6),
     secFacts: context.secFacts,
     contextWarnings: context.contextWarnings
+  };
+}
+
+function compactQuantPlan(plan: DeterministicTradePlan) {
+  return {
+    symbol: plan.symbol,
+    generatedAt: plan.generatedAt,
+    currentPrice: plan.currentPrice,
+    marketRegime: plan.marketRegime ? {
+      regime: plan.marketRegime.regime,
+      score: plan.marketRegime.score,
+      riskAdjustmentMultiplier: plan.marketRegime.riskAdjustmentMultiplier,
+      warnings: plan.marketRegime.warnings
+    } : null,
+    bias: plan.bias,
+    action: plan.action,
+    entryZone: plan.entryZone,
+    stopLoss: plan.stopLoss,
+    conservativeTarget: plan.conservativeTarget,
+    aggressiveTarget: plan.aggressiveTarget,
+    riskReward: plan.riskReward,
+    positionSizeShares: plan.positionSizeShares,
+    maxRiskDollars: plan.maxRiskDollars,
+    invalidationCondition: plan.invalidationCondition,
+    timeHorizon: plan.timeHorizon,
+    keyReasons: plan.keyReasons,
+    keyRisks: plan.keyRisks,
+    warnings: plan.warnings,
+    ranking: {
+      rawScore: plan.ranking.rawScore,
+      adjustedScore: plan.ranking.adjustedScore,
+      action: plan.ranking.action,
+      reasons: plan.ranking.reasons,
+      warnings: plan.ranking.warnings,
+      components: plan.ranking.components
+    }
   };
 }

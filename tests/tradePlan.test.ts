@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildDeterministicTradePlan } from "../server/tradePlan";
+import { buildDeterministicTradePlan, constrainAiTradePlanToQuantPlan } from "../server/tradePlan";
 import { getDefaultRiskSettings } from "../server/storage";
-import type { MarketRegimeSnapshot, SignalSnapshot } from "../src/shared/types";
+import type { MarketRegimeSnapshot, SignalSnapshot, TradePlan } from "../src/shared/types";
 
 describe("deterministic trade plan", () => {
   it("uses ranking and risk settings as the source of truth", () => {
@@ -32,6 +32,38 @@ describe("deterministic trade plan", () => {
     expect(plan.maxRiskDollars).toBe(250);
     expect(plan.action).not.toBe("paper_long_candidate");
     expect([...plan.keyRisks, ...plan.warnings].join(" ")).toMatch(/bearish/i);
+  });
+
+  it("prevents an AI explanation from overriding quantitative safety", () => {
+    const quantitativePlan = buildDeterministicTradePlan({
+      snapshot: makeSnapshot({ riskReward: 0.7, score: 45, trend: "range", bias: "neutral" }),
+      riskSettings: getDefaultRiskSettings(),
+      marketRegime: makeRegime("bearish")
+    });
+    const aiPlan: TradePlan = {
+      symbol: "AAPL",
+      action: "paper_long_candidate",
+      bias: "bullish",
+      beginnerSummary: "Aggressive AI idea.",
+      summary: "AI wanted a buy.",
+      thesis: ["AI thesis.", "AI confirmation."],
+      invalidation: "AI stop.",
+      entryRequirements: ["AI entry.", "AI check."],
+      entryNotes: ["AI entry note."],
+      doNotTradeIf: ["AI blocker.", "AI second blocker."],
+      riskNotes: ["AI risk.", "AI risk two."],
+      optionsNotes: ["Research only."],
+      actionChecklist: ["Check earnings.", "Confirm paper only.", "Accept risk."],
+      confidence: "high",
+      warnings: ["AI warning."]
+    };
+
+    const constrained = constrainAiTradePlanToQuantPlan(aiPlan, quantitativePlan);
+
+    expect(constrained.action).toBe(quantitativePlan.action);
+    expect(constrained.bias).toBe(quantitativePlan.bias);
+    expect(constrained.invalidation).toBe(quantitativePlan.invalidationCondition);
+    expect(constrained.warnings.join(" ")).toMatch(/constrained by the deterministic quantitative plan/i);
   });
 });
 

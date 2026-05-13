@@ -15,7 +15,7 @@ import { buildOpportunityScan, dateKey } from "./opportunities";
 import { enrichOptionIdeas } from "./options";
 import { buildPositionMonitorSnapshot } from "./positionMonitor";
 import { createStore, getStoreDescription } from "./storeFactory";
-import { buildDeterministicTradePlan } from "./tradePlan";
+import { buildDeterministicTradePlan, constrainAiTradePlanToQuantPlan } from "./tradePlan";
 import type { AppStore } from "./storage";
 import { normalizeSymbol, paperOrderSchema, validatePaperOrder, watchlistItemSchema } from "./validation";
 import type {
@@ -277,8 +277,14 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       return;
     }
 
-    const context = await getContextForSymbol(store, tradeContext, snapshot.symbol);
-    const plan = await tradePlanner.createTradePlan(snapshot, context, request.body?.notes);
+    const [context, riskSettings, marketRegime] = await Promise.all([
+      getContextForSymbol(store, tradeContext, snapshot.symbol),
+      store.getRiskSettings(),
+      getMarketRegimeSnapshot(alpaca).catch(() => null)
+    ]);
+    const quantitativePlan = buildDeterministicTradePlan({ snapshot, riskSettings, marketRegime });
+    const aiPlan = await tradePlanner.createTradePlan(snapshot, context, request.body?.notes, quantitativePlan);
+    const plan = constrainAiTradePlanToQuantPlan(aiPlan, quantitativePlan);
     const savedPlan = await store.saveTradePlan({
       symbol: snapshot.symbol,
       signalAsOf: snapshot.asOf,
@@ -286,7 +292,7 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       plan,
       context
     });
-    const enriched: EnrichedTradePlanResponse = { plan, context, savedPlan };
+    const enriched: EnrichedTradePlanResponse = { plan, context, savedPlan, quantitativePlan };
     response.json(enriched);
   }));
 

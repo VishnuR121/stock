@@ -269,6 +269,7 @@ export interface TradeContext {
 
 export interface EnrichedTradePlanResponse {
   plan: TradePlan;
+  quantitativePlan?: DeterministicTradePlan;
   context: TradeContext;
   savedPlan: SavedTradePlan;
 }

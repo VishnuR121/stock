@@ -1,11 +1,11 @@
-import type { ManagerVerdict, SafetyBlocker, SignalSnapshot, SpecialistReport, TradeContext, TradePlan } from "../src/shared/types";
+import type { DeterministicTradePlan, ManagerVerdict, SafetyBlocker, SignalSnapshot, SpecialistReport, TradeContext, TradePlan } from "../src/shared/types";
 import type { AppConfig } from "./config";
 import { AnthropicTradePlanner } from "./anthropic";
 import { OpenAiTradePlanner } from "./openai";
 
 export interface AiTradePlanner {
   readonly configured: boolean;
-  createTradePlan(snapshot: SignalSnapshot, context: TradeContext, userNotes?: string): Promise<TradePlan>;
+  createTradePlan(snapshot: SignalSnapshot, context: TradeContext, userNotes?: string, quantitativePlan?: DeterministicTradePlan): Promise<TradePlan>;
   createManagerVerdict(input: {
     snapshot: SignalSnapshot;
     context: TradeContext;

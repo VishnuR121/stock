@@ -481,6 +481,9 @@ export function App() {
         };
       });
       setContextsBySymbol((current) => ({ ...current, [activeSignal.symbol]: result.context }));
+      if (result.quantitativePlan) {
+        setQuantPlans((current) => ({ ...current, [activeSignal.symbol]: result.quantitativePlan as DeterministicTradePlan }));
+      }
       setAnalysisView("plan");
     } catch (error) {
       setMessage(getErrorMessage(error));

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AnthropicTradePlanner } from "../server/anthropic";
-import type { SignalSnapshot, TradeContext, TradePlan } from "../src/shared/types";
+import type { DeterministicTradePlan, SignalSnapshot, TradeContext, TradePlan } from "../src/shared/types";
 
 describe("AnthropicTradePlanner", () => {
   afterEach(() => {
@@ -35,15 +35,22 @@ describe("AnthropicTradePlanner", () => {
       dataFilePath: "data/test.json"
     });
 
-    await expect(planner.createTradePlan(makeSnapshot(), makeContext())).resolves.toEqual(plan);
+    await expect(planner.createTradePlan(makeSnapshot(), makeContext(), undefined, makeQuantPlan())).resolves.toEqual(plan);
     const [, init] = fetchMock.mock.calls[0];
     expect(init?.headers).toMatchObject({
       "x-api-key": "test-key",
       "anthropic-version": "2023-06-01"
     });
-    expect(JSON.parse(String(init?.body))).toMatchObject({
+    const body = JSON.parse(String(init?.body));
+    expect(body).toMatchObject({
       model: "claude-test",
       tool_choice: { type: "tool", name: "emit_trade_plan" }
+    });
+    expect(JSON.parse(body.messages[0].content).quantitativePlan).toMatchObject({
+      symbol: "AAPL",
+      action: "watch",
+      stopLoss: 95,
+      conservativeTarget: 110
     });
   });
 });
@@ -104,5 +111,51 @@ function makeContext(): TradeContext {
     news: [],
     recentFilings: [],
     contextWarnings: []
+  };
+}
+
+function makeQuantPlan(): DeterministicTradePlan {
+  return {
+    symbol: "AAPL",
+    generatedAt: "2026-05-13T14:00:00.000Z",
+    currentPrice: 100,
+    marketRegime: null,
+    bias: "neutral",
+    action: "watch",
+    entryZone: { low: 99, high: 101 },
+    stopLoss: 95,
+    conservativeTarget: 110,
+    aggressiveTarget: 112,
+    riskReward: 2,
+    positionSizeShares: 10,
+    positionNotional: 1000,
+    maxRiskDollars: 50,
+    invalidationCondition: "Close below 95 invalidates the setup.",
+    timeHorizon: "Swing trade.",
+    keyReasons: ["Trend is constructive."],
+    keyRisks: ["Paper only."],
+    warnings: ["Research only."],
+    ranking: {
+      symbol: "AAPL",
+      rawScore: 70,
+      adjustedScore: 70,
+      rank: 1,
+      action: "watch",
+      bias: "neutral",
+      reasons: ["Trend is constructive."],
+      warnings: ["Research only."],
+      suggestedStop: 95,
+      suggestedTarget: 110,
+      riskReward: 2,
+      components: {
+        trendScore: 70,
+        momentumScore: 70,
+        riskRewardScore: 70,
+        volumeScore: 50,
+        volatilityScore: 70,
+        rsiQualityScore: 80,
+        marketRegimeAdjustment: 0
+      }
+    }
   };
 }

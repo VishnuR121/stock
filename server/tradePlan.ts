@@ -1,4 +1,4 @@
-import type { DeterministicTradePlan, MarketRegimeSnapshot, RiskSettings, SignalSnapshot, TradeAction } from "../src/shared/types";
+import type { DeterministicTradePlan, MarketRegimeSnapshot, RiskSettings, SignalSnapshot, TradeAction, TradePlan } from "../src/shared/types";
 import { round } from "./indicators";
 import { rankSignalSnapshot } from "./ranking";
 
@@ -52,6 +52,31 @@ export function buildDeterministicTradePlan(input: BuildDeterministicTradePlanIn
   };
 }
 
+export function constrainAiTradePlanToQuantPlan(plan: TradePlan, quantitativePlan: DeterministicTradePlan): TradePlan {
+  return {
+    ...plan,
+    symbol: quantitativePlan.symbol,
+    action: quantitativePlan.action,
+    bias: quantitativePlan.bias,
+    invalidation: quantitativePlan.invalidationCondition,
+    entryNotes: [
+      `Quant entry zone: ${formatPlanPrice(quantitativePlan.entryZone.low)} to ${formatPlanPrice(quantitativePlan.entryZone.high)}.`,
+      `Quant stop: ${formatPlanPrice(quantitativePlan.stopLoss)}. Conservative target: ${formatPlanPrice(quantitativePlan.conservativeTarget)}. Aggressive target: ${formatPlanPrice(quantitativePlan.aggressiveTarget)}.`,
+      ...plan.entryNotes
+    ].slice(0, 5),
+    riskNotes: [
+      `Quant risk/reward: ${quantitativePlan.riskReward ?? "unavailable"}:1. Max risk: ${formatPlanPrice(quantitativePlan.maxRiskDollars)}.`,
+      ...quantitativePlan.keyRisks,
+      ...plan.riskNotes
+    ].slice(0, 6),
+    warnings: [
+      "AI explanation is constrained by the deterministic quantitative plan.",
+      ...quantitativePlan.warnings,
+      ...plan.warnings
+    ].filter((warning, index, warnings) => warnings.indexOf(warning) === index).slice(0, 6)
+  };
+}
+
 function getPlanAction(action: ReturnType<typeof rankSignalSnapshot>["action"], snapshot: SignalSnapshot): TradeAction {
   if (action === "buy" && snapshot.bias === "bullish") return "paper_long_candidate";
   if (action === "avoid") return "avoid";
@@ -98,4 +123,9 @@ function getPlanWarnings(snapshot: SignalSnapshot, riskSettings: RiskSettings, m
   if (!snapshot.suggestedStop || !snapshot.suggestedTarget) warnings.push("A valid stop and target are required before paper order creation.");
   if (marketRegime?.warnings[0]) warnings.push(marketRegime.warnings[0]);
   return warnings;
+}
+
+function formatPlanPrice(value: number | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "unavailable";
+  return value.toFixed(2);
 }
