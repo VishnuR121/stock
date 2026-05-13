@@ -65,6 +65,36 @@ describe("deterministic trade plan", () => {
     expect(constrained.invalidation).toBe(quantitativePlan.invalidationCondition);
     expect(constrained.warnings.join(" ")).toMatch(/constrained by the deterministic quantitative plan/i);
   });
+
+  it("tolerates incomplete AI array fields before saving the plan", () => {
+    const quantitativePlan = buildDeterministicTradePlan({
+      snapshot: makeSnapshot(),
+      riskSettings: getDefaultRiskSettings(),
+      marketRegime: makeRegime("bullish")
+    });
+    const incompletePlan = {
+      symbol: "AAPL",
+      action: "paper_long_candidate",
+      bias: "bullish",
+      beginnerSummary: "AI summary.",
+      summary: "AI summary.",
+      thesis: ["Trend up.", "Risk defined."],
+      invalidation: "AI invalidation.",
+      entryRequirements: ["Check price.", "Check earnings."],
+      doNotTradeIf: ["Earnings soon.", "Bad spread."],
+      optionsNotes: ["Research only."],
+      actionChecklist: ["Paper only.", "Accept risk.", "Use stop."],
+      confidence: "medium"
+    } as unknown as TradePlan;
+
+    const constrained = constrainAiTradePlanToQuantPlan(incompletePlan, quantitativePlan);
+
+    expect(constrained.entryNotes[0]).toMatch(/Quant entry zone/);
+    expect(constrained.riskNotes[0]).toMatch(/Quant risk\/reward/);
+    expect(constrained.thesis).toEqual(["Trend up.", "Risk defined."]);
+    expect(constrained.actionChecklist).toEqual(["Paper only.", "Accept risk.", "Use stop."]);
+    expect(constrained.warnings[0]).toMatch(/constrained by the deterministic quantitative plan/i);
+  });
 });
 
 function makeRegime(regime: MarketRegimeSnapshot["regime"]): MarketRegimeSnapshot {

@@ -2488,11 +2488,11 @@ function TradePlanView({
       <p className={`pill ${plan.bias}`}>{plan.bias} - {plan.confidence}</p>
       {plan.beginnerSummary && <p className="beginnerSummary">{plan.beginnerSummary}</p>}
       <p>{plan.summary}</p>
-      {plan.entryRequirements && <ListBlock title="Before Entry" items={plan.entryRequirements} />}
+      <ListBlock title="Before Entry" items={plan.entryRequirements} />
       <ListBlock title="Thesis" items={plan.thesis} />
       <ListBlock title="Risk" items={plan.riskNotes} />
-      {plan.doNotTradeIf && <ListBlock title="Do Not Trade If" items={plan.doNotTradeIf} />}
-      {plan.optionsNotes && <ListBlock title="Options Notes" items={plan.optionsNotes} />}
+      <ListBlock title="Do Not Trade If" items={plan.doNotTradeIf} />
+      <ListBlock title="Options Notes" items={plan.optionsNotes} />
       <ListBlock title="Checklist" items={plan.actionChecklist} />
       <p className="invalidation">{plan.invalidation}</p>
     </article>
@@ -2634,12 +2634,15 @@ function JournalList({
   );
 }
 
-function ListBlock({ title, items }: { title: string; items: string[] }) {
+function ListBlock({ title, items }: { title: string; items?: string[] }) {
+  const safeItems = Array.isArray(items) ? items.filter((item) => typeof item === "string" && item.trim().length > 0) : [];
+  if (!safeItems.length) return null;
+
   return (
     <div className="listBlock">
       <h3>{title}</h3>
       <ul>
-        {items.map((item) => (
+        {safeItems.map((item) => (
           <li key={item}>{item}</li>
         ))}
       </ul>
