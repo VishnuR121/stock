@@ -13,6 +13,8 @@ export type TradeAction =
   | "options_research_only";
 export type TradeHorizon = "intraday" | "swing" | "position" | "options_short_term";
 export type JournalStatus = "watching" | "paper_open" | "paper_closed" | "skipped";
+export type JournalSourceType = "manual" | "ai_plan" | "quant_plan" | "algo_proposal" | "paper_order";
+export type JournalExitReason = "target" | "stop" | "manual" | "time_exit" | "score_drop" | "other";
 export type SpecialistKind = "technical" | "market" | "fundamentals" | "options" | "risk" | "journal";
 export type SafetySeverity = "info" | "warning" | "blocker";
 export type AnalysisMode = "fast" | "deep";
@@ -550,6 +552,11 @@ export interface TradeJournalEntry {
   createdAt: string;
   updatedAt: string;
   planId?: string;
+  signalAsOf?: string;
+  sourceType?: JournalSourceType;
+  sourceId?: string;
+  followedPlan?: boolean;
+  exitReason?: JournalExitReason;
   status: JournalStatus;
   action: TradeAction;
   notes: string;
@@ -595,6 +602,11 @@ export interface PaperOrderRequest {
   earningsChecked: boolean;
   confirmedPaperOnly: boolean;
   acceptedRisk: boolean;
+  sourcePlanId?: string;
+  sourceSignalAsOf?: string;
+  sourceAnalysisId?: string;
+  sourceProposalId?: string;
+  followedPlan?: boolean;
 }
 
 export interface OptionOrderRequest {

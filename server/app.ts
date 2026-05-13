@@ -23,6 +23,8 @@ import type {
   AlgoTradeProposal,
   BacktestRequest,
   HealthStatus,
+  JournalExitReason,
+  JournalSourceType,
   JournalStatus,
   PaperOrderRequest,
   PaperOrderValidationResult,
@@ -413,6 +415,11 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
     });
     await store.addJournalEntry({
       symbol: proposal.symbol,
+      planId: proposal.id,
+      signalAsOf: proposal.signalAsOf,
+      sourceType: "algo_proposal",
+      sourceId: proposal.sourceAnalysisId,
+      followedPlan: true,
       status: "paper_open",
       action: journalAction,
       notes: `Placed from Algo Command Center proposal: ${proposal.strategyTitle}.`,
@@ -508,6 +515,11 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
     const entry = await store.addJournalEntry({
       symbol,
       planId: request.body?.planId,
+      signalAsOf: optionalString(request.body?.signalAsOf),
+      sourceType: normalizeJournalSourceType(request.body?.sourceType),
+      sourceId: optionalString(request.body?.sourceId),
+      followedPlan: typeof request.body?.followedPlan === "boolean" ? request.body.followedPlan : undefined,
+      exitReason: normalizeJournalExitReason(request.body?.exitReason),
       status: normalizeStatus(request.body?.status),
       action: normalizeAction(request.body?.action),
       notes: String(request.body?.notes ?? ""),
@@ -579,7 +591,22 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
     }
 
     const result = await alpaca.placePaperBracketOrder(validation.order);
-    response.json({ validation, order: result });
+    const journalEntry = await store.addJournalEntry({
+      symbol: orderInput.symbol,
+      planId: orderInput.sourcePlanId,
+      signalAsOf: orderInput.sourceSignalAsOf,
+      sourceType: orderInput.sourceProposalId ? "algo_proposal" : orderInput.sourcePlanId ? "ai_plan" : "paper_order",
+      sourceId: orderInput.sourceProposalId ?? orderInput.sourceAnalysisId ?? orderInput.sourcePlanId,
+      followedPlan: orderInput.followedPlan,
+      status: "paper_open",
+      action: orderInput.side === "sell" ? "paper_short_candidate" : "paper_long_candidate",
+      notes: getPaperOrderJournalNotes(orderInput, result),
+      entryPrice: referencePrice ?? undefined,
+      stopLossPrice: orderInput.stopLossPrice,
+      takeProfitPrice: orderInput.takeProfitPrice,
+      outcome: "open"
+    });
+    response.json({ validation, order: result, journalEntry });
   }));
 
   app.post("/api/alpaca/paper-orders/cancel-open", asyncHandler(async (_request, response) => {
@@ -636,6 +663,16 @@ function normalizeAction(value: unknown): TradeAction {
 function normalizeStatus(value: unknown): JournalStatus {
   const allowed: JournalStatus[] = ["watching", "paper_open", "paper_closed", "skipped"];
   return allowed.includes(value as JournalStatus) ? (value as JournalStatus) : "watching";
+}
+
+function normalizeJournalSourceType(value: unknown): JournalSourceType | undefined {
+  const allowed: JournalSourceType[] = ["manual", "ai_plan", "quant_plan", "algo_proposal", "paper_order"];
+  return allowed.includes(value as JournalSourceType) ? (value as JournalSourceType) : undefined;
+}
+
+function normalizeJournalExitReason(value: unknown): JournalExitReason | undefined {
+  const allowed: JournalExitReason[] = ["target", "stop", "manual", "time_exit", "score_drop", "other"];
+  return allowed.includes(value as JournalExitReason) ? (value as JournalExitReason) : undefined;
 }
 
 function optionalNumber(value: unknown): number | undefined {
@@ -747,6 +784,25 @@ function getRiskProfile(accountEquity: number, settings: RiskSettings) {
     maxDailyLossPct: settings.maxDailyLossPct,
     minRiskReward: settings.minRiskReward
   };
+}
+
+function getPaperOrderJournalNotes(order: PaperOrderRequest, brokerOrder: unknown): string {
+  const pieces = ["Paper bracket order submitted."];
+  if (order.sourcePlanId) pieces.push(`Source plan ${order.sourcePlanId}.`);
+  if (order.sourceAnalysisId) pieces.push(`Source analysis ${order.sourceAnalysisId}.`);
+  if (order.sourceProposalId) pieces.push(`Source proposal ${order.sourceProposalId}.`);
+  if (typeof order.followedPlan === "boolean") {
+    pieces.push(order.followedPlan ? "Marked as following the plan." : "Marked as deviating from the plan.");
+  }
+  const brokerId = getBrokerOrderId(brokerOrder);
+  if (brokerId) pieces.push(`Broker order ${brokerId}.`);
+  return pieces.join(" ");
+}
+
+function getBrokerOrderId(order: unknown): string | null {
+  if (!order || typeof order !== "object") return null;
+  const id = (order as { id?: unknown; client_order_id?: unknown }).id ?? (order as { client_order_id?: unknown }).client_order_id;
+  return typeof id === "string" ? id : null;
 }
 
 function enforceSafetyOnVerdict<T extends { action: TradeAction; warnings: string[] }>(verdict: T, blockers: Array<{ severity: string; message: string }>): T {

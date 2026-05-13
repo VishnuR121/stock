@@ -29,7 +29,12 @@ export const paperOrderSchema = z
     horizon: z.enum(TRADE_HORIZONS).default("intraday"),
     earningsChecked: z.boolean(),
     confirmedPaperOnly: z.boolean(),
-    acceptedRisk: z.boolean()
+    acceptedRisk: z.boolean(),
+    sourcePlanId: z.string().max(120).optional(),
+    sourceSignalAsOf: z.string().max(80).optional(),
+    sourceAnalysisId: z.string().max(120).optional(),
+    sourceProposalId: z.string().max(120).optional(),
+    followedPlan: z.boolean().optional()
   })
   .refine((order) => Boolean(order.quantity) !== Boolean(order.notional), {
     message: "Provide either quantity or notional, but not both.",

@@ -145,6 +145,72 @@ describe("API safety behavior", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("creates a linked journal entry after a successful paper order", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes("/v2/account")) {
+        return jsonResponse({
+          equity: "100000",
+          cash: "100000",
+          buying_power: "200000",
+          portfolio_value: "100000",
+          status: "ACTIVE",
+          currency: "USD"
+        });
+      }
+      if (target.includes("/v2/stocks/AAPL/bars")) {
+        return jsonResponse({
+          bars: [
+            { t: "2026-01-01T00:00:00Z", o: 100, h: 101, l: 99, c: 100, v: 1000000 }
+          ]
+        });
+      }
+      if (target.includes("/v2/orders")) return jsonResponse({ id: "broker-order-1", symbol: "AAPL" });
+      return jsonResponse({});
+    });
+
+    const app = createApp({
+      alpacaKeyId: "key",
+      alpacaSecretKey: "secret",
+      databaseUrl: undefined,
+      dataFilePath: `data/test-paper-order-journal-${Date.now()}.json`
+    });
+
+    const response = await request(app)
+      .post("/api/alpaca/paper-orders")
+      .send({
+        symbol: "AAPL",
+        side: "buy",
+        orderType: "market",
+        quantity: 2,
+        stopLossPrice: 95,
+        takeProfitPrice: 110,
+        timeInForce: "gtc",
+        horizon: "swing",
+        earningsChecked: true,
+        confirmedPaperOnly: true,
+        acceptedRisk: true,
+        sourcePlanId: "plan-aapl-1",
+        sourceSignalAsOf: "2026-05-13T14:00:00.000Z",
+        followedPlan: true
+      })
+      .expect(200);
+
+    expect(response.body.journalEntry).toMatchObject({
+      symbol: "AAPL",
+      status: "paper_open",
+      planId: "plan-aapl-1",
+      signalAsOf: "2026-05-13T14:00:00.000Z",
+      sourceType: "ai_plan",
+      sourceId: "plan-aapl-1",
+      followedPlan: true,
+      outcome: "open"
+    });
+
+    const journal = await request(app).get("/api/journal").expect(200);
+    expect(journal.body[0].notes).toMatch(/Broker order broker-order-1/);
+  });
+
   it("closes a single paper position after explicit confirmation", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
       const target = String(url);

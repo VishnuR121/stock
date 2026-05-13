@@ -689,13 +689,21 @@ export function App() {
     setBusy("order");
     setMessage(null);
     try {
-      await api("/api/alpaca/paper-orders", {
+      const result = await api<{ journalEntry?: TradeJournalEntry }>("/api/alpaca/paper-orders", {
         method: "POST",
-        body: JSON.stringify(orderDraft)
+        body: JSON.stringify({
+          ...orderDraft,
+          sourcePlanId: activePlanRecord?.id,
+          sourceSignalAsOf: activeSignal?.asOf,
+          followedPlan: activeSignal ? orderMatchesActivePlan(orderDraft, activeSignal, activeQuantPlan) : undefined
+        })
       });
       setReviewingOrder(false);
       setMessage("Paper bracket order submitted.");
-      await Promise.all([loadAccount(), loadPositions(), loadPositionMonitor()]);
+      if (result.journalEntry) {
+        setJournal((current) => [result.journalEntry as TradeJournalEntry, ...current.filter((entry) => entry.id !== result.journalEntry?.id)]);
+      }
+      await Promise.all([loadAccount(), loadPositions(), loadJournal(), loadPositionMonitor()]);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -2612,6 +2620,13 @@ function JournalList({
             </button>
           </div>
           <p>{formatAction(entry.action)} - {entry.notes || "No notes"}</p>
+          {(entry.sourceType || typeof entry.followedPlan === "boolean") && (
+            <small>
+              {[formatJournalSource(entry), typeof entry.followedPlan === "boolean" ? (entry.followedPlan ? "Followed plan" : "Plan deviation") : null]
+                .filter(Boolean)
+                .join(" - ")}
+            </small>
+          )}
           <small>{formatDateTime(entry.createdAt)}</small>
         </article>
       ))}
@@ -2779,6 +2794,18 @@ function updateNumber(
   update({ [key]: value === "" ? undefined : Number(value) } as Partial<PaperOrderRequest>);
 }
 
+function orderMatchesActivePlan(order: PaperOrderRequest, signal: SignalSnapshot, quantPlan: DeterministicTradePlan | null): boolean {
+  const plannedStop = quantPlan?.stopLoss ?? signal.suggestedStop;
+  const plannedTarget = quantPlan?.conservativeTarget ?? signal.suggestedTarget;
+  if (plannedStop === null || plannedTarget === null) return false;
+  return pricesMatch(order.stopLossPrice, plannedStop) && pricesMatch(order.takeProfitPrice, plannedTarget);
+}
+
+function pricesMatch(left?: number | null, right?: number | null): boolean {
+  if (typeof left !== "number" || typeof right !== "number") return false;
+  return Math.abs(left - right) < 0.01;
+}
+
 async function api<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -2896,6 +2923,18 @@ function formatAction(action?: TradeAction): string {
     default:
       return "Watch";
   }
+}
+
+function formatJournalSource(entry: TradeJournalEntry): string | null {
+  if (!entry.sourceType) return entry.planId ? `Plan ${entry.planId}` : null;
+  const labels: Record<NonNullable<TradeJournalEntry["sourceType"]>, string> = {
+    manual: "Manual",
+    ai_plan: "AI plan",
+    quant_plan: "Quant plan",
+    algo_proposal: "Algo proposal",
+    paper_order: "Paper order"
+  };
+  return entry.sourceId ? `${labels[entry.sourceType]} ${entry.sourceId}` : labels[entry.sourceType];
 }
 
 function formatStrategyKind(kind: AlgoTradeProposal["strategyKind"]): string {
