@@ -85,6 +85,20 @@ describe("dashboard", () => {
       if (target.endsWith("/api/journal")) {
         return jsonResponse(journalEntries);
       }
+      if (target.endsWith("/api/journal/analytics")) {
+        return jsonResponse({
+          totalPaperTrades: 2,
+          openPaperTrades: 1,
+          closedPaperTrades: 1,
+          skippedTrades: 1,
+          winRate: 100,
+          averageR: 2,
+          totalPnl: 250,
+          bestTrade: { id: "best", symbol: "AAPL", pnl: 250, rMultiple: 2 },
+          worstTrade: { id: "worst", symbol: "MSFT", pnl: -50, rMultiple: -1 },
+          mostCommonSkippedReason: "Earnings too close"
+        });
+      }
       if (target.includes("/api/journal/") && init?.method === "DELETE") {
         const id = target.split("/api/journal/")[1];
         journalEntries = journalEntries.filter((entry) => entry.id !== id);
@@ -176,6 +190,8 @@ describe("dashboard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Account$/i }));
     expect(await screen.findByText(/Delete me/)).toBeInTheDocument();
+    expect(screen.getByText("Total paper")).toBeInTheDocument();
+    expect(screen.getByText("Common skip: Earnings too close")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Delete SPY journal entry/i }));
     await waitFor(() => expect(screen.queryByText(/Delete me/)).not.toBeInTheDocument());

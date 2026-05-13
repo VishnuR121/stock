@@ -217,6 +217,32 @@ describe("API safety behavior", () => {
     expect(journal.body).toEqual([]);
   });
 
+  it("returns journal analytics from stored journal entries", async () => {
+    const app = createApp({
+      dataFilePath: `data/test-journal-analytics-${Date.now()}.json`,
+      databaseUrl: undefined
+    });
+
+    await request(app)
+      .post("/api/journal")
+      .send({
+        symbol: "AAPL",
+        status: "paper_closed",
+        action: "paper_long_candidate",
+        notes: "followed plan",
+        entryPrice: 100,
+        stopLossPrice: 95,
+        pnl: 250,
+        outcome: "win"
+      })
+      .expect(200);
+
+    const response = await request(app).get("/api/journal/analytics").expect(200);
+    expect(response.body.totalPaperTrades).toBe(1);
+    expect(response.body.winRate).toBe(100);
+    expect(response.body.bestTrade.symbol).toBe("AAPL");
+  });
+
   it("scans opportunities with same-day cache and force refresh", async () => {
     let barRequests = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {

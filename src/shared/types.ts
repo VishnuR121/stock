@@ -532,6 +532,26 @@ export interface TradeJournalEntry {
   pnl?: number;
 }
 
+export interface JournalTradeHighlight {
+  id: string;
+  symbol: string;
+  pnl: number;
+  rMultiple: number | null;
+}
+
+export interface JournalAnalytics {
+  totalPaperTrades: number;
+  openPaperTrades: number;
+  closedPaperTrades: number;
+  skippedTrades: number;
+  winRate: number;
+  averageR: number | null;
+  totalPnl: number;
+  bestTrade: JournalTradeHighlight | null;
+  worstTrade: JournalTradeHighlight | null;
+  mostCommonSkippedReason: string | null;
+}
+
 export interface PaperOrderRequest {
   symbol: string;
   side: OrderSide;

@@ -1619,12 +1619,45 @@ select {
   gap: 8px;
 }
 
+.journalAnalytics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
 .contextFacts div,
+.journalAnalytics div,
 .journalList article {
   min-width: 0;
   padding: 10px;
   border-radius: 8px;
   background: var(--surface);
+}
+
+.journalAnalytics span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.journalAnalytics strong {
+  display: block;
+  margin-top: 4px;
+}
+
+.journalAnalytics .journalInsight {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border-soft);
+}
+
+.journalInsight p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
 }
 
 .contextFacts strong {
@@ -2058,6 +2091,7 @@ th {
   .orderForm,
   .backtestForm,
   .backtestMetrics,
+  .journalAnalytics,
   .reviewList {
     grid-template-columns: 1fr;
   }

@@ -28,6 +28,7 @@ import type {
   BrokerAccountSnapshot,
   EnrichedTradePlanResponse,
   HealthStatus,
+  JournalAnalytics,
   MarketRegimeSnapshot,
   OpportunityCandidate,
   OpportunityScan,
@@ -111,6 +112,7 @@ export function App() {
   const [analysisRuns, setAnalysisRuns] = useState<Record<string, AnalysisRun>>({});
   const [tradePlans, setTradePlans] = useState<Record<string, SavedTradePlan>>({});
   const [journal, setJournal] = useState<TradeJournalEntry[]>([]);
+  const [journalAnalytics, setJournalAnalytics] = useState<JournalAnalytics | null>(null);
   const [opportunityScan, setOpportunityScan] = useState<OpportunityScan | null>(null);
   const [algoProposals, setAlgoProposals] = useState<AlgoTradeProposal[]>([]);
   const [positionMonitor, setPositionMonitor] = useState<PositionMonitorSnapshot | null>(null);
@@ -235,8 +237,10 @@ export function App() {
   async function loadJournal() {
     try {
       setJournal(await api<TradeJournalEntry[]>("/api/journal"));
+      setJournalAnalytics(await api<JournalAnalytics>("/api/journal/analytics"));
     } catch {
       setJournal([]);
+      setJournalAnalytics(null);
     }
   }
 
@@ -919,6 +923,7 @@ export function App() {
         <ClipboardCheck size={18} />
         <h2>Trade journal</h2>
       </div>
+      <JournalAnalyticsSummary analytics={journalAnalytics} />
       <JournalList journal={journal} busy={busy} onDelete={deleteJournalEntry} />
     </section>
   );
@@ -2439,6 +2444,46 @@ function ContextPanel({ context }: { context?: TradeContext }) {
           {context.contextWarnings.slice(0, 2).map((warning) => (
             <p key={warning}>{warning}</p>
           ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function JournalAnalyticsSummary({ analytics }: { analytics: JournalAnalytics | null }) {
+  if (!analytics) return <EmptyState text="Journal analytics unavailable" />;
+
+  return (
+    <section className="journalAnalytics" aria-label="Journal analytics">
+      <div>
+        <span>Total paper</span>
+        <strong>{analytics.totalPaperTrades}</strong>
+      </div>
+      <div>
+        <span>Win rate</span>
+        <strong>{formatPctPoints(analytics.winRate)}</strong>
+      </div>
+      <div>
+        <span>Average R</span>
+        <strong>{analytics.averageR === null ? "--" : analytics.averageR}</strong>
+      </div>
+      <div>
+        <span>Total P/L</span>
+        <strong>{formatCurrency(analytics.totalPnl)}</strong>
+      </div>
+      <div>
+        <span>Open</span>
+        <strong>{analytics.openPaperTrades}</strong>
+      </div>
+      <div>
+        <span>Skipped</span>
+        <strong>{analytics.skippedTrades}</strong>
+      </div>
+      {(analytics.bestTrade || analytics.worstTrade || analytics.mostCommonSkippedReason) && (
+        <div className="journalInsight">
+          {analytics.bestTrade && <p>Best: {analytics.bestTrade.symbol} {formatCurrency(analytics.bestTrade.pnl)}</p>}
+          {analytics.worstTrade && <p>Worst: {analytics.worstTrade.symbol} {formatCurrency(analytics.worstTrade.pnl)}</p>}
+          {analytics.mostCommonSkippedReason && <p>Common skip: {analytics.mostCommonSkippedReason}</p>}
         </div>
       )}
     </section>

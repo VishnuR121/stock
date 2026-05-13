@@ -5,6 +5,7 @@ import { AlpacaClient } from "./alpaca";
 import { buildAlgoTradeProposals } from "./algo";
 import { buildAnalysisRun, buildFallbackManagerVerdict, buildSafetyBlockers, buildSpecialistReports } from "./analysis";
 import { runBacktest } from "./backtest";
+import { buildJournalAnalytics } from "./journalAnalytics";
 import { createTradePlanner } from "./ai";
 import { getConfig, isPaperAlpacaUrl, type AppConfig } from "./config";
 import { TradeContextService } from "./context";
@@ -412,6 +413,10 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
 
   app.get("/api/journal", asyncHandler(async (_request, response) => {
     response.json(await store.getJournal());
+  }));
+
+  app.get("/api/journal/analytics", asyncHandler(async (_request, response) => {
+    response.json(buildJournalAnalytics(await store.getJournal()));
   }));
 
   app.get("/api/settings/risk", asyncHandler(async (_request, response) => {
