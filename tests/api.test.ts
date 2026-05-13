@@ -200,6 +200,23 @@ describe("API safety behavior", () => {
     expect(response.body.status).toBe("received");
   });
 
+  it("deletes journal entries from persistent storage", async () => {
+    const app = createApp({
+      dataFilePath: `data/test-journal-delete-${Date.now()}.json`,
+      databaseUrl: undefined
+    });
+
+    const created = await request(app)
+      .post("/api/journal")
+      .send({ symbol: "SPY", status: "watching", action: "watch", notes: "cleanup" })
+      .expect(200);
+
+    await request(app).delete(`/api/journal/${created.body.id}`).expect(200);
+
+    const journal = await request(app).get("/api/journal").expect(200);
+    expect(journal.body).toEqual([]);
+  });
+
   it("scans opportunities with same-day cache and force refresh", async () => {
     let barRequests = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
@@ -241,6 +258,97 @@ describe("API safety behavior", () => {
 
     await request(app).post("/api/opportunities/scan").send({ limit: 2, forceRefresh: true }).expect(200);
     expect(barRequests).toBe(5);
+  });
+
+  it("reuses cached symbol snapshots to avoid repeated market data calls", async () => {
+    let accountRequests = 0;
+    let barRequests = 0;
+    let snapshotRequests = 0;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes("/v2/account")) {
+        accountRequests += 1;
+        return jsonResponse({
+          equity: "100000",
+          cash: "100000",
+          buying_power: "200000",
+          portfolio_value: "100000",
+          status: "ACTIVE",
+          currency: "USD"
+        });
+      }
+      if (target.includes("/v2/stocks/SPY/bars")) {
+        barRequests += 1;
+        return jsonResponse({ bars: makeBars() });
+      }
+      if (target.includes("/v2/stocks/SPY/snapshot")) {
+        snapshotRequests += 1;
+        return jsonResponse({ ticker: "SPY" });
+      }
+      return jsonResponse({});
+    });
+
+    const app = createApp({
+      alpacaKeyId: "key",
+      alpacaSecretKey: "secret",
+      databaseUrl: undefined,
+      dataFilePath: `data/test-symbol-cache-${Date.now()}.json`
+    });
+
+    const first = await request(app).get("/api/symbol/SPY").expect(200);
+    expect(first.body.cached).toBe(false);
+
+    const second = await request(app).get("/api/symbol/SPY").expect(200);
+    expect(second.body.cached).toBe(true);
+    expect(accountRequests).toBe(1);
+    expect(barRequests).toBe(1);
+    expect(snapshotRequests).toBe(1);
+  });
+
+  it("reuses cached option ideas to reduce repeated option chain calls", async () => {
+    let optionRequests = 0;
+    let barRequests = 0;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes("/v2/options/contracts")) {
+        optionRequests += 1;
+        return jsonResponse({
+          option_contracts: [
+            {
+              symbol: "SPY260515C00600000",
+              underlying_symbol: "SPY",
+              type: "call",
+              expiration_date: "2026-05-15",
+              strike_price: "600",
+              close_price: "2.5",
+              open_interest: "1000"
+            }
+          ]
+        });
+      }
+      if (target.includes("/v2/stocks/SPY/bars")) {
+        barRequests += 1;
+        return jsonResponse({ bars: makeBars().slice(-5) });
+      }
+      return jsonResponse({});
+    });
+
+    const app = createApp({
+      alpacaKeyId: "key",
+      alpacaSecretKey: "secret",
+      databaseUrl: undefined,
+      dataFilePath: `data/test-options-cache-${Date.now()}.json`
+    });
+
+    const first = await request(app).get("/api/options/SPY").expect(200);
+    expect(first.body.cached).toBe(false);
+
+    const second = await request(app).get("/api/options/SPY").expect(200);
+    expect(second.body.cached).toBe(true);
+    expect(optionRequests).toBe(1);
+    expect(barRequests).toBe(1);
   });
 });
 

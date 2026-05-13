@@ -3,6 +3,7 @@ import path from "node:path";
 import type {
   AlgoTradeProposal,
   AnalysisRun,
+  OptionIdea,
   OpportunityScan,
   RiskSettings,
   SavedTradePlan,
@@ -32,13 +33,19 @@ export interface AppStore {
   saveRiskSettings(settings: RiskSettings): Promise<RiskSettings>;
   getCachedContext(symbol: string, maxAgeMs: number): Promise<TradeContext | null>;
   saveContext(symbol: string, context: TradeContext): Promise<TradeContext>;
+  getCachedSignal(symbol: string, maxAgeMs: number): Promise<AnalysisRun["snapshot"] | null>;
+  saveSignalSnapshot(signal: AnalysisRun["snapshot"]): Promise<AnalysisRun["snapshot"]>;
+  getCachedOptionIdeas(symbol: string, maxAgeMs: number): Promise<OptionIdea[] | null>;
+  saveOptionIdeas(symbol: string, ideas: OptionIdea[]): Promise<OptionIdea[]>;
   getLatestOpportunityScan(): Promise<OpportunityScan | null>;
   saveOpportunityScan(scan: OpportunityScan): Promise<OpportunityScan>;
   getAlgoTradeProposals(limit?: number): Promise<AlgoTradeProposal[]>;
   saveAlgoTradeProposals(proposals: AlgoTradeProposal[]): Promise<AlgoTradeProposal[]>;
   updateAlgoTradeProposal(id: string, patch: Partial<AlgoTradeProposal>): Promise<AlgoTradeProposal>;
+  deleteAlgoTradeProposal(id: string): Promise<{ id: string }>;
   addJournalEntry(entry: Omit<TradeJournalEntry, "id" | "createdAt" | "updatedAt">): Promise<TradeJournalEntry>;
   getJournal(): Promise<TradeJournalEntry[]>;
+  deleteJournalEntry(id: string): Promise<{ id: string }>;
 }
 
 export const createSeedWatchlist = () =>
@@ -56,6 +63,8 @@ const emptyData = (): StoredAppData => ({
   tradingViewSignals: [],
   riskSettings: getDefaultRiskSettings(),
   contextCache: {},
+  signalCache: {},
+  optionsCache: {},
   journal: [],
   algoTradeProposals: [],
   opportunityScans: [],
@@ -195,6 +204,42 @@ export class JsonStore implements AppStore {
     return context;
   }
 
+  async getCachedSignal(symbol: string, maxAgeMs: number): Promise<AnalysisRun["snapshot"] | null> {
+    const data = await this.read();
+    const cached = data.signalCache[symbol];
+    if (!cached) return null;
+    const age = Date.now() - new Date(cached.savedAt).getTime();
+    return age <= maxAgeMs ? cached.signal : null;
+  }
+
+  async saveSignalSnapshot(signal: AnalysisRun["snapshot"]): Promise<AnalysisRun["snapshot"]> {
+    const data = await this.read();
+    data.signalCache[signal.symbol] = {
+      savedAt: new Date().toISOString(),
+      signal
+    };
+    await this.write(data);
+    return signal;
+  }
+
+  async getCachedOptionIdeas(symbol: string, maxAgeMs: number): Promise<OptionIdea[] | null> {
+    const data = await this.read();
+    const cached = data.optionsCache[symbol];
+    if (!cached) return null;
+    const age = Date.now() - new Date(cached.savedAt).getTime();
+    return age <= maxAgeMs ? cached.ideas : null;
+  }
+
+  async saveOptionIdeas(symbol: string, ideas: OptionIdea[]): Promise<OptionIdea[]> {
+    const data = await this.read();
+    data.optionsCache[symbol] = {
+      savedAt: new Date().toISOString(),
+      ideas
+    };
+    await this.write(data);
+    return ideas;
+  }
+
   async getLatestOpportunityScan(): Promise<OpportunityScan | null> {
     const data = await this.read();
     return data.opportunityScans[0] ?? null;
@@ -214,8 +259,11 @@ export class JsonStore implements AppStore {
 
   async saveAlgoTradeProposals(proposals: AlgoTradeProposal[]): Promise<AlgoTradeProposal[]> {
     const data = await this.read();
-    const ids = new Set(proposals.map((proposal) => proposal.id));
-    data.algoTradeProposals = [...proposals, ...data.algoTradeProposals.filter((proposal) => !ids.has(proposal.id))].slice(0, 100);
+    const keys = new Set(proposals.map(getActiveProposalKey));
+    data.algoTradeProposals = [
+      ...proposals,
+      ...data.algoTradeProposals.filter((proposal) => !keys.has(getActiveProposalKey(proposal)))
+    ].slice(0, 100);
     await this.write(data);
     return proposals;
   }
@@ -233,6 +281,13 @@ export class JsonStore implements AppStore {
     data.algoTradeProposals[index] = next;
     await this.write(data);
     return next;
+  }
+
+  async deleteAlgoTradeProposal(id: string): Promise<{ id: string }> {
+    const data = await this.read();
+    data.algoTradeProposals = data.algoTradeProposals.filter((proposal) => proposal.id !== id);
+    await this.write(data);
+    return { id };
   }
 
   async addJournalEntry(entry: Omit<TradeJournalEntry, "id" | "createdAt" | "updatedAt">): Promise<TradeJournalEntry> {
@@ -255,6 +310,13 @@ export class JsonStore implements AppStore {
     return data.journal;
   }
 
+  async deleteJournalEntry(id: string): Promise<{ id: string }> {
+    const data = await this.read();
+    data.journal = data.journal.filter((entry) => entry.id !== id);
+    await this.write(data);
+    return { id };
+  }
+
   private async ensureParent(): Promise<void> {
     await mkdir(path.dirname(this.filePath), { recursive: true });
   }
@@ -269,9 +331,23 @@ export function normalizeData(raw: Partial<StoredAppData>): StoredAppData {
     tradingViewSignals: Array.isArray(raw.tradingViewSignals) ? raw.tradingViewSignals : [],
     riskSettings: { ...getDefaultRiskSettings(), ...(raw.riskSettings ?? {}) },
     contextCache: raw.contextCache ?? {},
+    signalCache: raw.signalCache ?? {},
+    optionsCache: raw.optionsCache ?? {},
     journal: Array.isArray(raw.journal) ? raw.journal : [],
     algoTradeProposals: Array.isArray(raw.algoTradeProposals) ? raw.algoTradeProposals : [],
     opportunityScans: Array.isArray(raw.opportunityScans) ? raw.opportunityScans : [],
     scanHistory: Array.isArray(raw.scanHistory) ? raw.scanHistory : []
   };
+}
+
+function getActiveProposalKey(proposal: AlgoTradeProposal): string {
+  if (proposal.status === "placed" || proposal.status === "rejected") return proposal.id;
+  return [
+    proposal.symbol,
+    proposal.strategyKind,
+    proposal.direction,
+    proposal.executionType,
+    proposal.order?.side ?? "",
+    proposal.optionOrder?.contractSymbol ?? ""
+  ].join("|");
 }

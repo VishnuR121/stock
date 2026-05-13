@@ -192,6 +192,11 @@ h3 {
   background: var(--accent);
 }
 
+.iconButton.danger {
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+
 .textButton.secondary {
   color: var(--accent);
   background: var(--accent-soft);
@@ -215,7 +220,8 @@ h3 {
 }
 
 .wideButton:disabled,
-.textButton:disabled {
+.textButton:disabled,
+.iconButton:disabled {
   cursor: not-allowed;
   opacity: 0.52;
 }
@@ -332,7 +338,169 @@ h3 {
   display: grid;
   min-width: 0;
   flex: 1;
-  gap: 14px;
+  align-content: start;
+  gap: 12px;
+}
+
+.workspaceTabs {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.workspaceTab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  min-width: 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.workspaceTab span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspaceTab.active {
+  color: #ffffff;
+  background: var(--accent);
+}
+
+.tabSurface,
+.overviewStack {
+  display: grid;
+  gap: 12px;
+}
+
+.twoColumnSurface {
+  grid-template-columns: minmax(0, 0.85fr) minmax(320px, 0.55fr);
+  align-items: start;
+}
+
+.researchDetailGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.56fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.accountSurface {
+  grid-template-columns: minmax(0, 0.85fr) minmax(340px, 0.6fr);
+  align-items: start;
+}
+
+.commandPanel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.34fr);
+  gap: 16px;
+  align-items: center;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.commandCopy {
+  min-width: 0;
+}
+
+.commandCopy span,
+.overviewMetrics span,
+.overviewCard span {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.commandCopy h2 {
+  margin: 4px 0 8px;
+  font-size: clamp(1.55rem, 2.4vw, 2.45rem);
+  line-height: 1.05;
+}
+
+.commandCopy p,
+.overviewCard p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.commandActions {
+  display: grid;
+  gap: 8px;
+}
+
+.secondaryAction {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.overviewMetrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.overviewMetrics article,
+.overviewCard {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.overviewMetrics strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 1.05rem;
+}
+
+.overviewMetrics article.warn {
+  border-color: var(--warn-border);
+  color: var(--warn-text);
+  background: var(--warn-surface);
+}
+
+.overviewMetrics article.danger {
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+  background: var(--danger-surface);
+}
+
+.overviewGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.overviewCard {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.overviewCard div {
+  display: grid;
+  gap: 3px;
 }
 
 .panel {
@@ -532,6 +700,84 @@ h3 {
   background: var(--surface-muted);
   font-size: 0.84rem;
   font-weight: 800;
+}
+
+.algoSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.algoSummary span {
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 4px 9px;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+
+.algoToolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.45fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.segmentedControl {
+  display: inline-grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  min-width: 0;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.segmentedControl button {
+  min-width: 0;
+  min-height: 32px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.segmentedControl button.active {
+  color: #ffffff;
+  background: var(--accent);
+}
+
+.segmentedControl button:disabled {
+  opacity: 0.45;
+}
+
+.searchControl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  background: var(--surface-soft);
+}
+
+.searchControl input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  font-size: 0.86rem;
 }
 
 .algoList {
@@ -1327,11 +1573,20 @@ select {
   border: 1px solid var(--border-soft);
 }
 
-.journalList article div {
+.journalTopline {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.journalTopline strong {
+  margin-right: auto;
+}
+
+.journalTopline .iconButton {
+  width: 30px;
+  height: 30px;
 }
 
 .decisionCenter {
@@ -1644,16 +1899,37 @@ th {
 @media (max-width: 1180px) {
   .statusGrid,
   .signalGrid,
-  .focusGrid {
+  .focusGrid,
+  .twoColumnSurface,
+  .researchDetailGrid,
+  .accountSurface,
+  .overviewMetrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workspaceTabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .commandPanel {
+    grid-template-columns: 1fr;
+  }
+
+  .algoToolbar {
+    grid-template-columns: 1fr;
   }
 
   .workspace {
     flex-direction: column;
   }
 
+  .mainColumn {
+    order: 1;
+  }
+
   .leftRail,
   .sidebar {
+    order: 2;
     position: static;
     width: 100%;
     flex-basis: auto;
@@ -1673,6 +1949,12 @@ th {
   .statusGrid,
   .signalGrid,
   .focusGrid,
+  .workspaceTabs,
+  .twoColumnSurface,
+  .researchDetailGrid,
+  .accountSurface,
+  .overviewMetrics,
+  .overviewGrid,
   .opportunityGrid,
   .algoList,
   .monitorList,

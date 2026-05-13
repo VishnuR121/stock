@@ -31,6 +31,8 @@ import type {
 } from "../src/shared/types";
 
 const CONTEXT_CACHE_MS = 24 * 60 * 60 * 1000;
+const SIGNAL_CACHE_MS = 15 * 60 * 1000;
+const OPTIONS_CACHE_MS = 15 * 60 * 1000;
 
 export function createApp(overrides: Partial<AppConfig> = {}) {
   const config = getConfig(overrides);
@@ -79,7 +81,10 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
     }
 
     const analysisRun = buildAnalysisRun({ ...analysisInput, managerVerdict });
-    await store.saveAnalysisRun(analysisRun);
+    await Promise.all([
+      store.saveAnalysisRun(analysisRun),
+      store.saveSignalSnapshot(analysisInput.snapshot)
+    ]);
     return { analysisRun, account, riskSettings };
   };
 
@@ -143,6 +148,7 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
     }
 
     const scan = await store.addScanHistory(symbols, snapshots);
+    await Promise.all(snapshots.map((snapshot) => store.saveSignalSnapshot(snapshot)));
     response.json({ scan, snapshots });
   }));
 
@@ -169,22 +175,42 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
 
   app.get("/api/symbol/:symbol", asyncHandler(async (request, response) => {
     const symbol = normalizeSymbol(request.params.symbol);
+    const cachedSignal = await store.getCachedSignal(symbol, SIGNAL_CACHE_MS);
+    if (cachedSignal) {
+      response.json({
+        signal: cachedSignal,
+        snapshot: null,
+        cached: true
+      });
+      return;
+    }
+
     const account = await safeAccount(alpaca);
     const riskProfile = getDefaultRiskProfile(account.equity ?? 100000);
     const [bars, snapshot] = await Promise.all([alpaca.getBars(symbol), alpaca.getSnapshot(symbol).catch(() => null)]);
+    const signal = await store.saveSignalSnapshot(buildSignalSnapshot(symbol, bars, riskProfile));
     response.json({
-      signal: buildSignalSnapshot(symbol, bars, riskProfile),
-      snapshot
+      signal,
+      snapshot,
+      cached: false
     });
   }));
 
   app.get("/api/options/:symbol", asyncHandler(async (request, response) => {
     const symbol = normalizeSymbol(request.params.symbol);
+    const cachedIdeas = await store.getCachedOptionIdeas(symbol, OPTIONS_CACHE_MS);
+    if (cachedIdeas) {
+      response.json({ symbol, ideas: cachedIdeas, cached: true });
+      return;
+    }
+
     const [ideas, bars] = await Promise.all([
       alpaca.getOptionIdeas(symbol),
       alpaca.getBars(symbol, 5).catch(() => [])
     ]);
-    response.json({ symbol, ideas: enrichOptionIdeas(ideas, bars.at(-1)?.close ?? null) });
+    const enriched = enrichOptionIdeas(ideas, bars.at(-1)?.close ?? null);
+    await store.saveOptionIdeas(symbol, enriched);
+    response.json({ symbol, ideas: enriched, cached: false });
   }));
 
   app.get("/api/context/:symbol", asyncHandler(async (request, response) => {
@@ -253,6 +279,10 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       rejectionReason: optionalString(request.body?.reason) ?? "Rejected after review."
     });
     response.json({ proposal });
+  }));
+
+  app.delete("/api/algo/proposals/:id", asyncHandler(async (request, response) => {
+    response.json(await store.deleteAlgoTradeProposal(request.params.id));
   }));
 
   app.post("/api/algo/proposals/:id/execute", asyncHandler(async (request, response) => {
@@ -439,6 +469,10 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       pnl: optionalNumber(request.body?.pnl)
     });
     response.json(entry);
+  }));
+
+  app.delete("/api/journal/:id", asyncHandler(async (request, response) => {
+    response.json(await store.deleteJournalEntry(request.params.id));
   }));
 
   app.get("/api/alpaca/account", asyncHandler(async (_request, response) => {

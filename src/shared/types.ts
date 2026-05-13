@@ -486,6 +486,16 @@ export interface OptionIdea {
   liquidityWarning: string | null;
 }
 
+export interface CachedSignalSnapshot {
+  savedAt: string;
+  signal: SignalSnapshot;
+}
+
+export interface CachedOptionIdeas {
+  savedAt: string;
+  ideas: OptionIdea[];
+}
+
 export interface BrokerAccountSnapshot {
   id?: string;
   status?: string;
@@ -505,6 +515,8 @@ export interface StoredAppData {
   tradingViewSignals: TradingViewSignal[];
   riskSettings: RiskSettings;
   contextCache: Record<string, TradeContext>;
+  signalCache: Record<string, CachedSignalSnapshot>;
+  optionsCache: Record<string, CachedOptionIdeas>;
   journal: TradeJournalEntry[];
   algoTradeProposals: AlgoTradeProposal[];
   opportunityScans: OpportunityScan[];

@@ -65,6 +65,8 @@ type BeginnerAction = {
 };
 type ThemeMode = "light" | "dark";
 type AnalysisView = "decision" | "plan";
+type WorkspaceView = "overview" | "research" | "algo" | "positions" | "orders" | "account";
+type AlgoQueueFilter = "active" | "selected" | "all" | "history";
 
 const emptyOrder: PaperOrderRequest = {
   symbol: "",
@@ -92,7 +94,8 @@ export function App() {
   const [opportunityScan, setOpportunityScan] = useState<OpportunityScan | null>(null);
   const [algoProposals, setAlgoProposals] = useState<AlgoTradeProposal[]>([]);
   const [positionMonitor, setPositionMonitor] = useState<PositionMonitorSnapshot | null>(null);
-  const [options, setOptions] = useState<OptionIdea[]>([]);
+  const [optionsBySymbol, setOptionsBySymbol] = useState<Record<string, OptionIdea[]>>({});
+  const [contextsBySymbol, setContextsBySymbol] = useState<Record<string, TradeContext>>({});
   const [account, setAccount] = useState<BrokerAccountSnapshot | null>(null);
   const [positions, setPositions] = useState<PositionsResponse | null>(null);
   const [riskSettings, setRiskSettings] = useState<RiskSettings | null>(null);
@@ -103,6 +106,9 @@ export function App() {
   const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
   const [analysisView, setAnalysisView] = useState<AnalysisView>("decision");
   const [opportunityOpen, setOpportunityOpen] = useState(true);
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("overview");
+  const [algoQueueFilter, setAlgoQueueFilter] = useState<AlgoQueueFilter>("active");
+  const [algoSearch, setAlgoSearch] = useState("");
 
   useEffect(() => {
     void refreshBasics();
@@ -128,6 +134,7 @@ export function App() {
       horizon,
       timeInForce: selectDefaultTimeInForce({ horizon, assetClass: "stock" })
     }));
+    void loadContext(activeSignal.symbol);
     void loadOptions(activeSignal.symbol);
     void loadAnalysisHistory(activeSignal.symbol);
   }, [activeSignal]);
@@ -138,6 +145,8 @@ export function App() {
   const activePlanRecord = activeSignal ? tradePlans[activeSignal.symbol] : undefined;
   const activeTradePlan = activePlanRecord?.plan ?? null;
   const activeAnalysis = activeSignal ? analysisRuns[activeSignal.symbol] : null;
+  const activeContext = activeSignal ? contextsBySymbol[activeSignal.symbol] ?? activeAnalysis?.context ?? activePlanRecord?.context ?? null : null;
+  const activeOptions = activeSignal ? optionsBySymbol[activeSignal.symbol] ?? [] : [];
   const orderReferencePrice = orderDraft.orderType === "limit" ? orderDraft.limitPrice ?? null : activeSignal?.lastPrice ?? null;
   const orderTargetRealism = checkDayOrderTargetRealism({
     order: orderDraft,
@@ -180,7 +189,12 @@ export function App() {
 
   async function loadSavedPlans() {
     try {
-      setTradePlans(await api<Record<string, SavedTradePlan>>("/api/trade-plans"));
+      const savedPlans = await api<Record<string, SavedTradePlan>>("/api/trade-plans");
+      setTradePlans(savedPlans);
+      setContextsBySymbol((current) => ({
+        ...Object.fromEntries(Object.entries(savedPlans).map(([symbol, plan]) => [symbol, plan.context])),
+        ...current
+      }));
     } catch {
       setTradePlans({});
     }
@@ -333,6 +347,12 @@ export function App() {
   }
 
   async function loadSymbol(symbol: string) {
+    const cached = snapshots.find((snapshot) => snapshot.symbol === symbol);
+    if (cached) {
+      setActiveSignal(cached);
+      return;
+    }
+
     setBusy(`symbol-${symbol}`);
     setMessage(null);
     try {
@@ -350,11 +370,22 @@ export function App() {
   }
 
   async function loadOptions(symbol: string) {
+    if (optionsBySymbol[symbol]) return;
     try {
       const result = await api<{ ideas: OptionIdea[] }>(`/api/options/${symbol}`);
-      setOptions(result.ideas);
+      setOptionsBySymbol((current) => ({ ...current, [symbol]: result.ideas }));
     } catch {
-      setOptions([]);
+      setOptionsBySymbol((current) => ({ ...current, [symbol]: [] }));
+    }
+  }
+
+  async function loadContext(symbol: string) {
+    if (contextsBySymbol[symbol]) return;
+    try {
+      const result = await api<TradeContext>(`/api/context/${symbol}`);
+      setContextsBySymbol((current) => ({ ...current, [symbol]: result }));
+    } catch {
+      // Context helps the review flow, but missing it should not block a symbol.
     }
   }
 
@@ -363,6 +394,7 @@ export function App() {
       const runs = await api<AnalysisRun[]>(`/api/analysis-runs/${symbol}`);
       if (runs[0]) {
         setAnalysisRuns((current) => ({ ...current, [symbol]: runs[0] }));
+        setContextsBySymbol((current) => ({ ...current, [symbol]: current[symbol] ?? runs[0].context }));
       }
     } catch {
       // Analysis runs are an enhancement; missing history should not block symbol review.
@@ -384,6 +416,7 @@ export function App() {
           [activeSignal.symbol]: result.savedPlan
         };
       });
+      setContextsBySymbol((current) => ({ ...current, [activeSignal.symbol]: result.context }));
       setAnalysisView("plan");
     } catch (error) {
       setMessage(getErrorMessage(error));
@@ -402,6 +435,7 @@ export function App() {
         body: JSON.stringify({ snapshot: activeSignal, mode: "fast" })
       });
       setAnalysisRuns((current) => ({ ...current, [activeSignal.symbol]: result.analysisRun }));
+      setContextsBySymbol((current) => ({ ...current, [activeSignal.symbol]: result.analysisRun.context }));
       setAnalysisView("decision");
       setMessage("Decision Center analysis saved.");
     } catch (error) {
@@ -421,9 +455,10 @@ export function App() {
         body: JSON.stringify({ snapshot: activeSignal, mode: "fast" })
       });
       setAnalysisRuns((current) => ({ ...current, [activeSignal.symbol]: result.analysisRun }));
+      setContextsBySymbol((current) => ({ ...current, [activeSignal.symbol]: result.analysisRun.context }));
       setAlgoProposals((current) => {
         const ids = new Set(result.proposals.map((proposal) => proposal.id));
-        return [...result.proposals, ...current.filter((proposal) => !ids.has(proposal.id))].slice(0, 25);
+        return [...result.proposals, ...current.filter((proposal) => !ids.has(proposal.id))];
       });
       setAnalysisView("decision");
       setMessage("Algo proposals added to the approval queue.");
@@ -466,6 +501,38 @@ export function App() {
       });
       setAlgoProposals((current) => current.map((item) => item.id === proposal.id ? result.proposal : item));
       setMessage(`${proposal.symbol} algo proposal rejected.`);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function deleteAlgoProposal(proposal: AlgoTradeProposal) {
+    setBusy(`algo-delete-${proposal.id}`);
+    setMessage(null);
+    try {
+      await api<{ id: string }>(`/api/algo/proposals/${proposal.id}`, {
+        method: "DELETE"
+      });
+      setAlgoProposals((current) => current.filter((item) => item.id !== proposal.id));
+      setMessage(`${proposal.symbol} algo proposal deleted.`);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function deleteJournalEntry(entry: TradeJournalEntry) {
+    setBusy(`journal-delete-${entry.id}`);
+    setMessage(null);
+    try {
+      await api<{ id: string }>(`/api/journal/${entry.id}`, {
+        method: "DELETE"
+      });
+      setJournal((current) => current.filter((item) => item.id !== entry.id));
+      setMessage(`${entry.symbol} journal entry deleted.`);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -607,6 +674,191 @@ export function App() {
     }
   }
 
+  const signalPanel = (
+    <section className="panel">
+      <div className="panelTitle">
+        <Target size={18} />
+        <div>
+          <h2>Signals</h2>
+          <p>Setup score is 0-100. Higher means cleaner conditions, not an automatic buy.</p>
+        </div>
+      </div>
+      <div className="signalGrid">
+        {(sortedSnapshots.length ? sortedSnapshots : watchlistPreview(watchlist)).map((signal) => (
+          <SignalCard
+            key={signal.symbol}
+            signal={signal}
+            active={activeSignal?.symbol === signal.symbol}
+            loading={busy === `symbol-${signal.symbol}`}
+            onSelect={() => {
+              setWorkspaceView("research");
+              return isFullSignal(signal) ? setActiveSignal(signal) : loadSymbol(signal.symbol);
+            }}
+          />
+        ))}
+      </div>
+    </section>
+  );
+
+  const detailPanel = (
+    <section className="panel detailPanel">
+      <div className="panelTitle spaced detailHeader">
+        <div className="detailHeading">
+          <h2>{activeSignal?.symbol ?? "Symbol detail"}</h2>
+          <p>{activeSignal ? `${activeSignal.trend} - ${activeSignal.bias}` : "Select a ticker"}</p>
+        </div>
+        <div className="detailActions">
+          <button className="textButton" onClick={generateTradePlan} disabled={!activeSignal || busy === "ai"}>
+            {busy === "ai" ? <Loader2 className="spin" size={17} /> : <Bot size={17} />}
+            <span>{activeSignal && activePlanRecord ? "Refresh plan" : "AI plan"}</span>
+          </button>
+          <button className="textButton secondary" onClick={generateAnalysisRun} disabled={!activeSignal || busy === "analysis"}>
+            {busy === "analysis" ? <Loader2 className="spin" size={17} /> : <ShieldCheck size={17} />}
+            <span>Decision Center</span>
+          </button>
+        </div>
+      </div>
+
+      {activeSignal ? (
+        <>
+          <BeginnerGuidance signal={activeSignal} plan={activeTradePlan} />
+          <Sparkline bars={activeSignal.bars} />
+          <MetricStrip signal={activeSignal} />
+          <div className="notes">
+            {activeSignal.notes.map((note) => (
+              <p key={note}>{note}</p>
+            ))}
+          </div>
+
+          <div className="analysisTabs">
+            <button
+              className={`tabButton ${analysisView === "decision" ? "active" : ""}`}
+              onClick={() => setAnalysisView("decision")}
+            >
+              Decision Center
+            </button>
+            <button
+              className={`tabButton ${analysisView === "plan" ? "active" : ""}`}
+              onClick={() => setAnalysisView("plan")}
+            >
+              AI Plan
+            </button>
+          </div>
+
+          {analysisView === "decision" ? (
+            <section className="analysisSurface">
+              <div className="panelTitle compact">
+                <ShieldCheck size={18} />
+                <p>Deterministic reports feed one manager synthesis. Safety blockers win.</p>
+              </div>
+              {activeAnalysis ? (
+                <DecisionCenter analysis={activeAnalysis} />
+              ) : (
+                <EmptyState text="Run Decision Center from an active signal" />
+              )}
+            </section>
+          ) : (
+            <section className="analysisSurface">
+              <div className="panelTitle compact">
+                <Bot size={18} />
+                <div>
+                  <h2>AI trade plan</h2>
+                  {activePlanRecord && (
+                    <p>
+                      Saved for {activePlanRecord.plan.symbol} at {formatDateTime(activePlanRecord.createdAt)}
+                      {activeSignal && activePlanRecord.signalAsOf !== activeSignal.asOf ? " - scan changed, refresh when ready" : ""}
+                    </p>
+                  )}
+                </div>
+              </div>
+              {activeTradePlan ? (
+                <TradePlanView
+                  plan={activeTradePlan}
+                  signal={activeSignal}
+                  savedPlan={activePlanRecord}
+                  onJournal={addJournalFromPlan}
+                  busy={busy === "journal"}
+                />
+              ) : (
+                <EmptyState text="Generate a plan from an active signal" />
+              )}
+            </section>
+          )}
+        </>
+      ) : (
+        <EmptyState text="No signal loaded" />
+      )}
+    </section>
+  );
+
+  const orderPanel = (
+    <section className="panel compactPanel">
+      <div className="panelTitle">
+        <ClipboardCheck size={18} />
+        <h2>Paper order</h2>
+      </div>
+      <PaperOrderForm
+        activeSignal={activeSignal}
+        orderDraft={orderDraft}
+        setOrderDraft={setOrderDraft}
+        targetRealism={orderTargetRealism}
+        onReview={() => setReviewingOrder(true)}
+      />
+    </section>
+  );
+
+  const safetyPanel = (
+    <section className="panel compactPanel">
+      <div className="panelTitle spaced">
+        <div>
+          <h2>Safety controls</h2>
+          <p>Paper-only emergency controls and risk lockout.</p>
+        </div>
+        <button className={`textButton ${riskSettings?.killSwitchEnabled ? "danger" : "secondary"}`} onClick={() => setKillSwitch(!riskSettings?.killSwitchEnabled)} disabled={!riskSettings || busy === "risk"}>
+          <ShieldCheck size={16} />
+          <span>{riskSettings?.killSwitchEnabled ? "Disable kill switch" : "Enable kill switch"}</span>
+        </button>
+      </div>
+      <SafetyControls riskSettings={riskSettings} onCancelOrders={cancelOpenPaperOrders} onFlattenPositions={flattenPaperPositions} busy={busy} />
+    </section>
+  );
+
+  const contextPanel = (
+    <section className="panel compactPanel">
+      <div className="panelTitle">
+        <Settings size={18} />
+        <h2>Context + options</h2>
+      </div>
+      <ContextPanel context={activeContext ?? undefined} />
+      <OptionsTable options={activeOptions} />
+    </section>
+  );
+
+  const accountPanel = (
+    <section className="panel compactPanel">
+      <details className="collapseBlock" open>
+        <summary>
+          <Activity size={16} />
+          <span>Paper account</span>
+          <ChevronDown className="summaryChevron" size={16} />
+        </summary>
+        <div className="collapseBody">
+          <AccountPanel account={account} positions={positions} />
+        </div>
+      </details>
+    </section>
+  );
+
+  const journalPanel = (
+    <section className="panel compactPanel">
+      <div className="panelTitle">
+        <ClipboardCheck size={18} />
+        <h2>Trade journal</h2>
+      </div>
+      <JournalList journal={journal} busy={busy} onDelete={deleteJournalEntry} />
+    </section>
+  );
+
   return (
     <main className="shell">
       <section className="topbar" aria-label="Workspace status">
@@ -719,208 +971,100 @@ export function App() {
             </button>
           </section>
 
-          <section className="panel compactPanel sidebarJournal">
-            <div className="panelTitle">
-              <ClipboardCheck size={18} />
-              <h2>Trade journal</h2>
-            </div>
-            <JournalList journal={journal} />
-          </section>
         </aside>
 
         <section className="mainColumn">
-          <OpportunityFinderPanel
-            scan={opportunityScan}
-            busy={busy}
-            open={opportunityOpen}
-            onToggleOpen={() => setOpportunityOpen((current) => !current)}
-            onFind={() => findOpportunities(false)}
-            onRefresh={() => findOpportunities(true)}
-            onAnalyze={analyzeOpportunity}
-            onAddToWatchlist={addOpportunityToWatchlist}
-            onRunScan={runOpportunityScan}
-          />
+          <WorkspaceTabs activeView={workspaceView} onChange={setWorkspaceView} />
 
-          <AlgoCommandCenter
-            activeSignal={activeSignal}
-            proposals={algoProposals}
-            busy={busy}
-            onGenerate={generateAlgoProposals}
-            onExecute={executeAlgoProposal}
-            onReject={rejectAlgoProposal}
-          />
+          {workspaceView === "overview" && (
+            <OverviewPanel
+              activeSignal={activeSignal}
+              account={account}
+              positions={positions}
+              proposals={algoProposals}
+              monitor={positionMonitor}
+              riskSettings={riskSettings}
+              busy={busy}
+              onRunScan={() => {
+                setWorkspaceView("research");
+                void runScan();
+              }}
+              onFindOpportunities={() => {
+                setWorkspaceView("research");
+                void findOpportunities(false);
+              }}
+              onBuildAlgo={() => {
+                setWorkspaceView("algo");
+                void generateAlgoProposals();
+              }}
+              onReviewOrder={() => setWorkspaceView("orders")}
+              onOpenResearch={() => setWorkspaceView("research")}
+            />
+          )}
 
-          <PositionMonitorPanel
-            monitor={positionMonitor}
-            busy={busy}
-            onRefresh={refreshPositionMonitor}
-            onClose={closeMonitoredPosition}
-          />
-
-          <section className="panel">
-            <div className="panelTitle">
-              <Target size={18} />
-              <div>
-                <h2>Signals</h2>
-                <p>Setup score is 0-100. Higher means cleaner conditions, not an automatic buy.</p>
+          {workspaceView === "research" && (
+            <div className="tabSurface">
+              <OpportunityFinderPanel
+                scan={opportunityScan}
+                busy={busy}
+                open={opportunityOpen}
+                onToggleOpen={() => setOpportunityOpen((current) => !current)}
+                onFind={() => findOpportunities(false)}
+                onRefresh={() => findOpportunities(true)}
+                onAnalyze={analyzeOpportunity}
+                onAddToWatchlist={addOpportunityToWatchlist}
+                onRunScan={runOpportunityScan}
+              />
+              {signalPanel}
+              <div className="researchDetailGrid">
+                {detailPanel}
+                {contextPanel}
               </div>
             </div>
-            <div className="signalGrid">
-              {(sortedSnapshots.length ? sortedSnapshots : watchlistPreview(watchlist)).map((signal) => (
-                <SignalCard
-                  key={signal.symbol}
-                  signal={signal}
-                  active={activeSignal?.symbol === signal.symbol}
-                  loading={busy === `symbol-${signal.symbol}`}
-                  onSelect={() => (isFullSignal(signal) ? setActiveSignal(signal) : loadSymbol(signal.symbol))}
-                />
-              ))}
+          )}
+
+          {workspaceView === "algo" && (
+            <div className="tabSurface">
+              <AlgoCommandCenter
+                activeSignal={activeSignal}
+                proposals={algoProposals}
+                busy={busy}
+                filter={algoQueueFilter}
+                search={algoSearch}
+                onFilterChange={setAlgoQueueFilter}
+                onSearchChange={setAlgoSearch}
+                onGenerate={generateAlgoProposals}
+                onExecute={executeAlgoProposal}
+                onReject={rejectAlgoProposal}
+                onDelete={deleteAlgoProposal}
+              />
             </div>
-          </section>
+          )}
 
-          <section className="focusGrid">
-            <section className="panel detailPanel">
-              <div className="panelTitle spaced detailHeader">
-                <div className="detailHeading">
-                  <h2>{activeSignal?.symbol ?? "Symbol detail"}</h2>
-                  <p>{activeSignal ? `${activeSignal.trend} - ${activeSignal.bias}` : "Select a ticker"}</p>
-                </div>
-                <div className="detailActions">
-                  <button className="textButton" onClick={generateTradePlan} disabled={!activeSignal || busy === "ai"}>
-                    {busy === "ai" ? <Loader2 className="spin" size={17} /> : <Bot size={17} />}
-                    <span>{activeSignal && activePlanRecord ? "Refresh plan" : "AI plan"}</span>
-                  </button>
-                  <button className="textButton secondary" onClick={generateAnalysisRun} disabled={!activeSignal || busy === "analysis"}>
-                    {busy === "analysis" ? <Loader2 className="spin" size={17} /> : <ShieldCheck size={17} />}
-                    <span>Decision Center</span>
-                  </button>
-                </div>
-              </div>
+          {workspaceView === "positions" && (
+            <div className="tabSurface">
+              <PositionMonitorPanel
+                monitor={positionMonitor}
+                busy={busy}
+                onRefresh={refreshPositionMonitor}
+                onClose={closeMonitoredPosition}
+              />
+            </div>
+          )}
 
-              {activeSignal ? (
-                <>
-                  <BeginnerGuidance signal={activeSignal} plan={activeTradePlan} />
-                  <Sparkline bars={activeSignal.bars} />
-                  <MetricStrip signal={activeSignal} />
-                  <div className="notes">
-                    {activeSignal.notes.map((note) => (
-                      <p key={note}>{note}</p>
-                    ))}
-                  </div>
+          {workspaceView === "orders" && (
+            <div className="tabSurface twoColumnSurface">
+              {orderPanel}
+              {safetyPanel}
+            </div>
+          )}
 
-                  <div className="analysisTabs">
-                    <button
-                      className={`tabButton ${analysisView === "decision" ? "active" : ""}`}
-                      onClick={() => setAnalysisView("decision")}
-                    >
-                      Decision Center
-                    </button>
-                    <button
-                      className={`tabButton ${analysisView === "plan" ? "active" : ""}`}
-                      onClick={() => setAnalysisView("plan")}
-                    >
-                      AI Plan
-                    </button>
-                  </div>
-
-                  {analysisView === "decision" ? (
-                    <section className="analysisSurface">
-                      <div className="panelTitle compact">
-                        <ShieldCheck size={18} />
-                        <p>Deterministic reports feed one manager synthesis. Safety blockers win.</p>
-                      </div>
-                      {activeAnalysis ? (
-                        <DecisionCenter analysis={activeAnalysis} />
-                      ) : (
-                        <EmptyState text="Run Decision Center from an active signal" />
-                      )}
-                    </section>
-                  ) : (
-                    <section className="analysisSurface">
-                      <div className="panelTitle compact">
-                        <Bot size={18} />
-                        <div>
-                          <h2>AI trade plan</h2>
-                          {activePlanRecord && (
-                            <p>
-                              Saved for {activePlanRecord.plan.symbol} at {formatDateTime(activePlanRecord.createdAt)}
-                              {activeSignal && activePlanRecord.signalAsOf !== activeSignal.asOf ? " - scan changed, refresh when ready" : ""}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      {activeTradePlan ? (
-                        <TradePlanView
-                          plan={activeTradePlan}
-                          signal={activeSignal}
-                          savedPlan={activePlanRecord}
-                          onJournal={addJournalFromPlan}
-                          busy={busy === "journal"}
-                        />
-                      ) : (
-                        <EmptyState text="Generate a plan from an active signal" />
-                      )}
-                    </section>
-                  )}
-                </>
-              ) : (
-                <EmptyState text="No signal loaded" />
-              )}
-            </section>
-
-            <aside className="sideRail">
-              <section className="panel compactPanel">
-                <div className="panelTitle">
-                  <ClipboardCheck size={18} />
-                  <h2>Paper order</h2>
-                </div>
-                <PaperOrderForm
-                  activeSignal={activeSignal}
-                  orderDraft={orderDraft}
-                  setOrderDraft={setOrderDraft}
-                  targetRealism={orderTargetRealism}
-                  onReview={() => setReviewingOrder(true)}
-                />
-              </section>
-
-              <section className="panel compactPanel">
-                <div className="panelTitle spaced">
-                  <div>
-                    <h2>Safety controls</h2>
-                    <p>Paper-only emergency controls and risk lockout.</p>
-                  </div>
-                  <button className={`textButton ${riskSettings?.killSwitchEnabled ? "danger" : "secondary"}`} onClick={() => setKillSwitch(!riskSettings?.killSwitchEnabled)} disabled={!riskSettings || busy === "risk"}>
-                    <ShieldCheck size={16} />
-                    <span>{riskSettings?.killSwitchEnabled ? "Disable kill switch" : "Enable kill switch"}</span>
-                  </button>
-                </div>
-                <SafetyControls riskSettings={riskSettings} onCancelOrders={cancelOpenPaperOrders} onFlattenPositions={flattenPaperPositions} busy={busy} />
-              </section>
-
-              <section className="panel compactPanel">
-                <div className="panelTitle">
-                  <Settings size={18} />
-                  <h2>Context + options</h2>
-                </div>
-                <ContextPanel context={activePlanRecord?.context} />
-                <OptionsTable options={options} />
-              </section>
-
-              <section className="panel compactPanel">
-                <details className="collapseBlock">
-                  <summary>
-                    <Activity size={16} />
-                    <span>Paper account</span>
-                    <ChevronDown className="summaryChevron" size={16} />
-                  </summary>
-                  <div className="collapseBody">
-                    <AccountPanel account={account} positions={positions} />
-                  </div>
-                </details>
-              </section>
-
-            </aside>
-          </section>
+          {workspaceView === "account" && (
+            <div className="tabSurface accountSurface">
+              {accountPanel}
+              {journalPanel}
+            </div>
+          )}
         </section>
       </section>
 
@@ -983,6 +1127,149 @@ export function App() {
         </div>
       )}
     </main>
+  );
+}
+
+function WorkspaceTabs({
+  activeView,
+  onChange
+}: {
+  activeView: WorkspaceView;
+  onChange: (view: WorkspaceView) => void;
+}) {
+  const tabs: Array<{ view: WorkspaceView; label: string; icon: JSX.Element }> = [
+    { view: "overview", label: "Overview", icon: <Activity size={16} /> },
+    { view: "research", label: "Research", icon: <Target size={16} /> },
+    { view: "algo", label: "Algo", icon: <Bot size={16} /> },
+    { view: "positions", label: "Positions", icon: <LineChart size={16} /> },
+    { view: "orders", label: "Orders", icon: <ClipboardCheck size={16} /> },
+    { view: "account", label: "Account", icon: <Settings size={16} /> }
+  ];
+
+  return (
+    <nav className="workspaceTabs" aria-label="Workspace sections">
+      {tabs.map((tab) => (
+        <button
+          key={tab.view}
+          className={`workspaceTab ${activeView === tab.view ? "active" : ""}`}
+          onClick={() => onChange(tab.view)}
+          type="button"
+        >
+          {tab.icon}
+          <span>{tab.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function OverviewPanel({
+  activeSignal,
+  account,
+  positions,
+  proposals,
+  monitor,
+  riskSettings,
+  busy,
+  onRunScan,
+  onFindOpportunities,
+  onBuildAlgo,
+  onReviewOrder,
+  onOpenResearch
+}: {
+  activeSignal: SignalSnapshot | null;
+  account: BrokerAccountSnapshot | null;
+  positions: PositionsResponse | null;
+  proposals: AlgoTradeProposal[];
+  monitor: PositionMonitorSnapshot | null;
+  riskSettings: RiskSettings | null;
+  busy: string | null;
+  onRunScan: () => void;
+  onFindOpportunities: () => void;
+  onBuildAlgo: () => void;
+  onReviewOrder: () => void;
+  onOpenResearch: () => void;
+}) {
+  const queuedProposals = proposals.filter((proposal) => proposal.status === "queued").length;
+  const exitsSuggested = monitor?.summary.exitsSuggested ?? 0;
+  const openPositions = positions?.positions.length ?? 0;
+  const selectedLabel = activeSignal ? `${activeSignal.symbol} - ${activeSignal.bias}, score ${activeSignal.score}` : "Select or scan a ticker";
+
+  return (
+    <section className="overviewStack" aria-label="Overview">
+      <section className="commandPanel">
+        <div className="commandCopy">
+          <span>Today</span>
+          <h2>{selectedLabel}</h2>
+          <p>
+            Start with a scan, inspect one setup, then approve only paper orders that pass the safety checks.
+          </p>
+        </div>
+        <div className="commandActions">
+          <button className="wideButton" onClick={onRunScan} disabled={busy === "scan"}>
+            {busy === "scan" ? <Loader2 className="spin" size={17} /> : <BarChart3 size={17} />}
+            <span>Run scan</span>
+          </button>
+          <button className="wideButton secondaryAction" onClick={onFindOpportunities} disabled={Boolean(busy)}>
+            <Target size={17} />
+            <span>Find opportunities</span>
+          </button>
+          <button className="wideButton secondaryAction" onClick={onBuildAlgo} disabled={!activeSignal || busy === "algo"}>
+            {busy === "algo" ? <Loader2 className="spin" size={17} /> : <Bot size={17} />}
+            <span>Build algo proposal</span>
+          </button>
+        </div>
+      </section>
+
+      <section className="overviewMetrics">
+        <article>
+          <span>Equity</span>
+          <strong>{formatCurrency(account?.equity)}</strong>
+        </article>
+        <article>
+          <span>Open positions</span>
+          <strong>{openPositions}</strong>
+        </article>
+        <article className={queuedProposals ? "warn" : ""}>
+          <span>Queued proposals</span>
+          <strong>{queuedProposals}</strong>
+        </article>
+        <article className={exitsSuggested ? "danger" : ""}>
+          <span>Exit alerts</span>
+          <strong>{exitsSuggested}</strong>
+        </article>
+        <article className={riskSettings?.killSwitchEnabled ? "danger" : ""}>
+          <span>Kill switch</span>
+          <strong>{riskSettings?.killSwitchEnabled ? "On" : "Off"}</strong>
+        </article>
+      </section>
+
+      <section className="overviewGrid">
+        <article className="overviewCard">
+          <div>
+            <span>Selected setup</span>
+            <strong>{activeSignal?.symbol ?? "No ticker selected"}</strong>
+          </div>
+          <p>{activeSignal ? `${activeSignal.trend} trend, ${activeSignal.bias} bias, ${activeSignal.riskReward ?? "--"}:1 R/R.` : "Use the watchlist or scanner to load a symbol."}</p>
+          <button className="textButton secondary" onClick={onOpenResearch}>
+            <Target size={16} />
+            <span>Open research</span>
+          </button>
+        </article>
+
+        <article className="overviewCard">
+          <div>
+            <span>Next order</span>
+            <strong>{activeSignal ? activeSignal.symbol : "Waiting"}</strong>
+          </div>
+          <p>Review horizon, target distance, stop distance, and paper-only confirmations before placing anything.</p>
+          <button className="textButton secondary" onClick={onReviewOrder}>
+            <ClipboardCheck size={16} />
+            <span>Review order form</span>
+          </button>
+        </article>
+      </section>
+    </section>
   );
 }
 
@@ -1121,19 +1408,64 @@ function AlgoCommandCenter({
   activeSignal,
   proposals,
   busy,
+  filter,
+  search,
+  onFilterChange,
+  onSearchChange,
   onGenerate,
   onExecute,
-  onReject
+  onReject,
+  onDelete
 }: {
   activeSignal: SignalSnapshot | null;
   proposals: AlgoTradeProposal[];
   busy: string | null;
+  filter: AlgoQueueFilter;
+  search: string;
+  onFilterChange: (filter: AlgoQueueFilter) => void;
+  onSearchChange: (search: string) => void;
   onGenerate: () => void;
   onExecute: (proposal: AlgoTradeProposal) => void;
   onReject: (proposal: AlgoTradeProposal) => void;
+  onDelete: (proposal: AlgoTradeProposal) => void;
 }) {
-  const visible = proposals.slice(0, 4);
+  const statusOrder: Record<AlgoTradeProposal["status"], number> = {
+    queued: 0,
+    blocked: 1,
+    placed: 2,
+    rejected: 3
+  };
+  const sorted = [...proposals].sort((left, right) => {
+    const statusDelta = statusOrder[left.status] - statusOrder[right.status];
+    if (statusDelta !== 0) return statusDelta;
+    return right.updatedAt.localeCompare(left.updatedAt);
+  });
+  const activeProposals = sorted.filter((proposal) => proposal.status === "queued" || proposal.status === "blocked");
+  const uniqueActiveProposals = getUniqueActiveProposals(activeProposals);
+  const historyProposals = sorted.filter((proposal) => proposal.status === "placed" || proposal.status === "rejected");
+  const selectedSymbol = activeSignal?.symbol;
+  const filteredByView = filter === "active"
+    ? uniqueActiveProposals
+    : filter === "selected" && selectedSymbol
+      ? [...uniqueActiveProposals, ...historyProposals].filter((proposal) => proposal.symbol === selectedSymbol)
+      : filter === "history"
+        ? historyProposals
+        : [...uniqueActiveProposals, ...historyProposals];
+  const normalizedSearch = search.trim().toLowerCase();
+  const visible = normalizedSearch
+    ? filteredByView.filter((proposal) => getProposalSearchText(proposal).includes(normalizedSearch))
+    : filteredByView;
+  const queuedCount = proposals.filter((proposal) => proposal.status === "queued").length;
+  const placedCount = proposals.filter((proposal) => proposal.status === "placed").length;
+  const blockedCount = proposals.filter((proposal) => proposal.status === "blocked").length;
+  const duplicateCount = activeProposals.length - uniqueActiveProposals.length;
   const loading = busy === "algo";
+  const filters: Array<{ value: AlgoQueueFilter; label: string; disabled?: boolean }> = [
+    { value: "active", label: "Active" },
+    { value: "selected", label: selectedSymbol ? selectedSymbol : "Selected", disabled: !selectedSymbol },
+    { value: "all", label: "All" },
+    { value: "history", label: "History" }
+  ];
 
   return (
     <section className="panel algoPanel" aria-label="Algo Command Center">
@@ -1147,9 +1479,41 @@ function AlgoCommandCenter({
           <span>{activeSignal ? `Build ${activeSignal.symbol}` : "Select ticker"}</span>
         </button>
       </div>
+      <div className="algoSummary" aria-label="Algo proposal summary">
+        <span>{proposals.length} saved</span>
+        <span>{queuedCount} queued</span>
+        <span>{placedCount} placed</span>
+        {blockedCount ? <span>{blockedCount} blocked</span> : <span>0 blocked</span>}
+        {duplicateCount > 0 && <span>{duplicateCount} duplicate hidden</span>}
+        <span>{visible.length} shown</span>
+      </div>
+      <div className="algoToolbar">
+        <div className="segmentedControl" aria-label="Algo proposal view">
+          {filters.map((item) => (
+            <button
+              key={item.value}
+              className={filter === item.value ? "active" : ""}
+              disabled={item.disabled}
+              onClick={() => onFilterChange(item.value)}
+              type="button"
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <label className="searchControl">
+          <Search size={16} />
+          <input
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="Search ticker or strategy"
+            aria-label="Search algo proposals"
+          />
+        </label>
+      </div>
 
       {!visible.length ? (
-        <div className="algoEmpty">Generate proposals from a selected ticker to create an approval queue.</div>
+        <div className="algoEmpty">{proposals.length ? "No proposals match this view." : "Generate proposals from a selected ticker to create an approval queue."}</div>
       ) : (
         <div className="algoList">
           {visible.map((proposal) => (
@@ -1194,6 +1558,15 @@ function AlgoCommandCenter({
                   <Trash2 size={16} />
                   <span>Reject</span>
                 </button>
+                <button
+                  className="iconButton danger"
+                  onClick={() => onDelete(proposal)}
+                  disabled={busy === `algo-delete-${proposal.id}`}
+                  title="Delete proposal"
+                  aria-label={`Delete ${proposal.symbol} ${proposal.strategyTitle} proposal`}
+                >
+                  {busy === `algo-delete-${proposal.id}` ? <Loader2 className="spin" size={16} /> : <Trash2 size={16} />}
+                </button>
               </div>
             </article>
           ))}
@@ -1201,6 +1574,41 @@ function AlgoCommandCenter({
       )}
     </section>
   );
+}
+
+function getUniqueActiveProposals(proposals: AlgoTradeProposal[]) {
+  const byKey = new Map<string, AlgoTradeProposal>();
+  for (const proposal of proposals) {
+    const key = getProposalDedupeKey(proposal);
+    const current = byKey.get(key);
+    if (!current || proposal.updatedAt.localeCompare(current.updatedAt) > 0) {
+      byKey.set(key, proposal);
+    }
+  }
+  return [...byKey.values()];
+}
+
+function getProposalDedupeKey(proposal: AlgoTradeProposal) {
+  return [
+    proposal.symbol,
+    proposal.strategyKind,
+    proposal.direction,
+    proposal.executionType,
+    proposal.order?.side ?? "",
+    proposal.optionOrder?.contractSymbol ?? ""
+  ].join("|");
+}
+
+function getProposalSearchText(proposal: AlgoTradeProposal) {
+  return [
+    proposal.symbol,
+    proposal.strategyTitle,
+    proposal.strategyKind,
+    proposal.direction,
+    proposal.status,
+    proposal.summary,
+    proposal.optionOrder?.contractSymbol
+  ].filter(Boolean).join(" ").toLowerCase();
 }
 
 function PositionMonitorPanel({
@@ -1759,16 +2167,33 @@ function ContextPanel({ context }: { context?: TradeContext }) {
   );
 }
 
-function JournalList({ journal }: { journal: TradeJournalEntry[] }) {
+function JournalList({
+  journal,
+  busy,
+  onDelete
+}: {
+  journal: TradeJournalEntry[];
+  busy: string | null;
+  onDelete: (entry: TradeJournalEntry) => void;
+}) {
   if (!journal.length) return <EmptyState text="No journal entries yet" />;
 
   return (
     <div className="journalList">
       {journal.slice(0, 6).map((entry) => (
         <article key={entry.id}>
-          <div>
+          <div className="journalTopline">
             <strong>{entry.symbol}</strong>
             <span>{entry.status.replace("_", " ")}</span>
+            <button
+              className="iconButton danger"
+              onClick={() => onDelete(entry)}
+              disabled={busy === `journal-delete-${entry.id}`}
+              title="Delete journal entry"
+              aria-label={`Delete ${entry.symbol} journal entry`}
+            >
+              {busy === `journal-delete-${entry.id}` ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
+            </button>
           </div>
           <p>{formatAction(entry.action)} - {entry.notes || "No notes"}</p>
           <small>{formatDateTime(entry.createdAt)}</small>

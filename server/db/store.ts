@@ -2,6 +2,9 @@ import { desc, eq, inArray, sql } from "drizzle-orm";
 import type {
   AlgoTradeProposal,
   AnalysisRun,
+  CachedOptionIdeas,
+  CachedSignalSnapshot,
+  OptionIdea,
   OpportunityScan,
   RiskSettings,
   SavedTradePlan,
@@ -31,7 +34,7 @@ export class DatabaseStore implements AppStore {
   constructor(private readonly db: AppDb) {}
 
   async read(): Promise<StoredAppData> {
-    const [watchlist, notes, savedPlans, journal, algoTradeProposals, scans, contexts, settings, signals, opportunityScan] = await Promise.all([
+    const [watchlist, notes, savedPlans, journal, algoTradeProposals, scans, contexts, settings, signals, opportunityScan, signalCache, optionsCache] = await Promise.all([
       this.getWatchlist(),
       this.getTradeNotes(),
       this.getSavedPlans(),
@@ -41,7 +44,9 @@ export class DatabaseStore implements AppStore {
       this.getAllCachedContexts(),
       this.getRiskSettings(),
       this.getTradingViewSignals(),
-      this.getLatestOpportunityScan()
+      this.getLatestOpportunityScan(),
+      this.getSignalCacheMap(),
+      this.getOptionsCacheMap()
     ]);
 
     return {
@@ -52,6 +57,8 @@ export class DatabaseStore implements AppStore {
       tradingViewSignals: signals,
       riskSettings: settings,
       contextCache: contexts,
+      signalCache,
+      optionsCache,
       journal,
       algoTradeProposals,
       opportunityScans: opportunityScan ? [opportunityScan] : [],
@@ -75,6 +82,14 @@ export class DatabaseStore implements AppStore {
 
     for (const [symbol, context] of Object.entries(normalized.contextCache)) {
       await this.saveContext(symbol, context);
+    }
+
+    for (const entry of Object.values(normalized.signalCache)) {
+      await this.saveSignalSnapshot(entry.signal);
+    }
+
+    for (const [symbol, entry] of Object.entries(normalized.optionsCache)) {
+      await this.saveOptionIdeas(symbol, entry.ideas);
     }
 
     for (const plan of Object.values(normalized.savedPlans)) {
@@ -140,6 +155,8 @@ export class DatabaseStore implements AppStore {
       tradingViewSignals: [],
       riskSettings: await this.getRiskSettings(),
       contextCache: {},
+      signalCache: {},
+      optionsCache: {},
       journal: [],
       algoTradeProposals: [],
       opportunityScans: [],
@@ -297,6 +314,42 @@ export class DatabaseStore implements AppStore {
     return context;
   }
 
+  async getCachedSignal(symbol: string, maxAgeMs: number): Promise<AnalysisRun["snapshot"] | null> {
+    const cache = await this.getSignalCacheMap();
+    const cached = cache[symbol];
+    if (!cached) return null;
+    const age = Date.now() - new Date(cached.savedAt).getTime();
+    return age <= maxAgeMs ? cached.signal : null;
+  }
+
+  async saveSignalSnapshot(signal: AnalysisRun["snapshot"]): Promise<AnalysisRun["snapshot"]> {
+    const cache = await this.getSignalCacheMap();
+    cache[signal.symbol] = {
+      savedAt: new Date().toISOString(),
+      signal
+    };
+    await this.saveAppSetting("signalCache", cache);
+    return signal;
+  }
+
+  async getCachedOptionIdeas(symbol: string, maxAgeMs: number): Promise<OptionIdea[] | null> {
+    const cache = await this.getOptionsCacheMap();
+    const cached = cache[symbol];
+    if (!cached) return null;
+    const age = Date.now() - new Date(cached.savedAt).getTime();
+    return age <= maxAgeMs ? cached.ideas : null;
+  }
+
+  async saveOptionIdeas(symbol: string, ideas: OptionIdea[]): Promise<OptionIdea[]> {
+    const cache = await this.getOptionsCacheMap();
+    cache[symbol] = {
+      savedAt: new Date().toISOString(),
+      ideas
+    };
+    await this.saveAppSetting("optionsCache", cache);
+    return ideas;
+  }
+
   async getLatestOpportunityScan(): Promise<OpportunityScan | null> {
     const rows = await this.db.select().from(appSettings).where(eq(appSettings.key, "latestOpportunityScan")).limit(1);
     return (rows[0]?.value as OpportunityScan | undefined) ?? null;
@@ -321,8 +374,8 @@ export class DatabaseStore implements AppStore {
 
   async saveAlgoTradeProposals(proposals: AlgoTradeProposal[]): Promise<AlgoTradeProposal[]> {
     const current = await this.getAlgoTradeProposals(100);
-    const ids = new Set(proposals.map((proposal) => proposal.id));
-    const next = [...proposals, ...current.filter((proposal) => !ids.has(proposal.id))].slice(0, 100);
+    const keys = new Set(proposals.map(getActiveProposalKey));
+    const next = [...proposals, ...current.filter((proposal) => !keys.has(getActiveProposalKey(proposal)))].slice(0, 100);
     await this.db
       .insert(appSettings)
       .values({ key: "algoTradeProposals", value: next, updatedAt: new Date() })
@@ -352,6 +405,18 @@ export class DatabaseStore implements AppStore {
         set: { value: current, updatedAt: new Date() }
       });
     return nextProposal;
+  }
+
+  async deleteAlgoTradeProposal(id: string): Promise<{ id: string }> {
+    const current = (await this.getAlgoTradeProposals(100)).filter((proposal) => proposal.id !== id);
+    await this.db
+      .insert(appSettings)
+      .values({ key: "algoTradeProposals", value: current, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: appSettings.key,
+        set: { value: current, updatedAt: new Date() }
+      });
+    return { id };
   }
 
   async addJournalEntry(entry: Omit<TradeJournalEntry, "id" | "createdAt" | "updatedAt">): Promise<TradeJournalEntry> {
@@ -386,6 +451,11 @@ export class DatabaseStore implements AppStore {
     }));
   }
 
+  async deleteJournalEntry(id: string): Promise<{ id: string }> {
+    await this.db.delete(journalEntries).where(eq(journalEntries.id, id));
+    return { id };
+  }
+
   async getWatchlist(): Promise<WatchlistItem[]> {
     const rows = await this.db.select().from(watchlistItems).orderBy(watchlistItems.createdAt);
     if (rows.length) return rows.map(watchlistRowToItem);
@@ -410,6 +480,16 @@ export class DatabaseStore implements AppStore {
   private async getAllCachedContexts(): Promise<Record<string, TradeContext>> {
     const rows = await this.db.select().from(contextCache);
     return Object.fromEntries(rows.map((row) => [row.symbol, row.context]));
+  }
+
+  private async getSignalCacheMap(): Promise<Record<string, CachedSignalSnapshot>> {
+    const rows = await this.db.select().from(appSettings).where(eq(appSettings.key, "signalCache")).limit(1);
+    return (rows[0]?.value as Record<string, CachedSignalSnapshot> | undefined) ?? {};
+  }
+
+  private async getOptionsCacheMap(): Promise<Record<string, CachedOptionIdeas>> {
+    const rows = await this.db.select().from(appSettings).where(eq(appSettings.key, "optionsCache")).limit(1);
+    return (rows[0]?.value as Record<string, CachedOptionIdeas> | undefined) ?? {};
   }
 
   private async getScanHistory(): Promise<StoredAppData["scanHistory"]> {
@@ -520,6 +600,28 @@ export class DatabaseStore implements AppStore {
         }
       });
   }
+
+  private async saveAppSetting(key: string, value: unknown): Promise<void> {
+    await this.db
+      .insert(appSettings)
+      .values({ key, value: value as Record<string, unknown>, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: appSettings.key,
+        set: { value: value as Record<string, unknown>, updatedAt: new Date() }
+      });
+  }
+}
+
+function getActiveProposalKey(proposal: AlgoTradeProposal): string {
+  if (proposal.status === "placed" || proposal.status === "rejected") return proposal.id;
+  return [
+    proposal.symbol,
+    proposal.strategyKind,
+    proposal.direction,
+    proposal.executionType,
+    proposal.order?.side ?? "",
+    proposal.optionOrder?.contractSymbol ?? ""
+  ].join("|");
 }
 
 function numberOrUndefined(value: string | null): number | undefined {
