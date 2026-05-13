@@ -2,7 +2,6 @@ import type {
   AlgoTradeProposal,
   AnalysisRun,
   BrokerAccountSnapshot,
-  OptionOrderRequest,
   PaperOrderRequest,
   PaperOrderValidationResult,
   RiskSettings,
@@ -36,7 +35,6 @@ export function buildAlgoTradeProposals(input: BuildAlgoProposalInput): AlgoTrad
     const holdingPeriod = expectedHoldingPeriod(horizon);
     const referencePrice = input.referencePrice ?? input.analysisRun.snapshot.lastPrice;
     const order = buildPaperOrder(strategy, input, horizon);
-    const optionOrder = buildOptionOrder(strategy, input, horizon);
     const validation = order
       ? validatePaperOrder(
           { ...order, earningsChecked: true, confirmedPaperOnly: true, acceptedRisk: true },
@@ -56,8 +54,9 @@ export function buildAlgoTradeProposals(input: BuildAlgoProposalInput): AlgoTrad
       : undefined;
     const executable = Boolean(
       !hardBlocked &&
-      ((order && validation?.ok && (strategy.kind === "long_stock" || strategy.kind === "short_stock")) ||
-        (optionOrder && (strategy.kind === "long_call" || strategy.kind === "long_put")))
+      order &&
+      validation?.ok &&
+      (strategy.kind === "long_stock" || strategy.kind === "short_stock")
     );
 
     return {
@@ -71,7 +70,7 @@ export function buildAlgoTradeProposals(input: BuildAlgoProposalInput): AlgoTrad
       strategyTitle: strategy.title,
       direction: strategy.direction,
       status: hardBlocked ? "blocked" : "queued",
-      executionType: getExecutionType(strategy, order, optionOrder),
+      executionType: getExecutionType(strategy, order),
       horizon,
       expectedHoldingPeriod: holdingPeriod,
       executable,
@@ -81,7 +80,6 @@ export function buildAlgoTradeProposals(input: BuildAlgoProposalInput): AlgoTrad
       riskNotes: strategy.riskNotes,
       warnings: buildWarnings(strategy, validation, hardBlocked),
       order,
-      optionOrder,
       validation,
       targetRealism
     } satisfies AlgoTradeProposal;
@@ -158,38 +156,12 @@ function buildPaperOrder(strategy: StrategyCandidate, input: BuildAlgoProposalIn
   };
 }
 
-function buildOptionOrder(strategy: StrategyCandidate, input: BuildAlgoProposalInput, horizon: ReturnType<typeof deriveTradeHorizon>): OptionOrderRequest | undefined {
-  if (strategy.kind !== "long_call" && strategy.kind !== "long_put") return undefined;
-  if (strategy.suitability !== "research" || !strategy.representativeContract) return undefined;
-  const maxLoss = strategy.estimatedMaxLoss ?? null;
-  const equity = input.account.equity ?? 100000;
-  if (!maxLoss || maxLoss > equity * input.riskSettings.maxRiskPerTradePct) return undefined;
-  const premium = round(maxLoss / 100, 2);
-  return {
-    contractSymbol: strategy.representativeContract,
-    underlyingSymbol: input.analysisRun.symbol,
-    optionType: strategy.kind === "long_call" ? "call" : "put",
-    orderType: "limit",
-    quantity: 1,
-    limitPrice: premium,
-    timeInForce: selectDefaultTimeInForce({ horizon, assetClass: "option", strategyKind: strategy.kind }),
-    horizon,
-    estimatedPremium: premium,
-    estimatedMaxLoss: maxLoss,
-    earningsChecked: false,
-    confirmedPaperOnly: false,
-    acceptedRisk: false
-  };
-}
-
 function getExecutionType(
   strategy: StrategyCandidate,
-  order: PaperOrderRequest | undefined,
-  optionOrder: OptionOrderRequest | undefined
+  order: PaperOrderRequest | undefined
 ): AlgoTradeProposal["executionType"] {
   if (strategy.kind === "long_stock" && order) return "long_stock_bracket";
   if (strategy.kind === "short_stock" && order) return "short_stock_bracket";
-  if ((strategy.kind === "long_call" || strategy.kind === "long_put") && optionOrder) return "long_option";
   return "research_only";
 }
 
@@ -239,7 +211,7 @@ function buildWarnings(
     warnings.push("Research only: broker execution for this strategy is not enabled yet.");
   }
   if (strategy.kind === "short_stock") warnings.push("Short-selling requires margin/borrow availability and can lose more than the initial plan if price gaps.");
-  if (strategy.kind === "long_call" || strategy.kind === "long_put") warnings.push("Options orders are single-leg paper limit orders only; spreads remain research-only.");
+  if (strategy.kind === "long_call" || strategy.kind === "long_put") warnings.push("Options are analysis-only; this app does not place option orders.");
   if (validation && !validation.ok) warnings.push(...validation.errors);
   if (validation?.warnings.length) warnings.push(...validation.warnings);
   return [...new Set(warnings)].slice(0, 8);

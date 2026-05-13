@@ -27,6 +27,7 @@ import type {
   BrokerAccountSnapshot,
   EnrichedTradePlanResponse,
   HealthStatus,
+  MarketRegimeSnapshot,
   OpportunityCandidate,
   OpportunityScan,
   OptionIdea,
@@ -99,6 +100,7 @@ export function App() {
   const [account, setAccount] = useState<BrokerAccountSnapshot | null>(null);
   const [positions, setPositions] = useState<PositionsResponse | null>(null);
   const [riskSettings, setRiskSettings] = useState<RiskSettings | null>(null);
+  const [marketRegime, setMarketRegime] = useState<MarketRegimeSnapshot | null>(null);
   const [orderDraft, setOrderDraft] = useState<PaperOrderRequest>(emptyOrder);
   const [reviewingOrder, setReviewingOrder] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -163,7 +165,16 @@ export function App() {
       ]);
       setHealth(healthData);
       setWatchlist(watchlistData);
-      await Promise.all([loadAccount(), loadPositions(), loadSavedPlans(), loadJournal(), loadRiskSettings(), loadAlgoProposals(), loadPositionMonitor()]);
+      await Promise.all([
+        loadAccount(),
+        loadPositions(),
+        loadSavedPlans(),
+        loadJournal(),
+        loadRiskSettings(),
+        loadAlgoProposals(),
+        loadPositionMonitor(),
+        loadMarketRegime()
+      ]);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -229,6 +240,14 @@ export function App() {
       setRiskSettings(await api<RiskSettings>("/api/settings/risk"));
     } catch {
       setRiskSettings(null);
+    }
+  }
+
+  async function loadMarketRegime() {
+    try {
+      setMarketRegime(await api<MarketRegimeSnapshot>("/api/market/regime"));
+    } catch {
+      setMarketRegime(null);
     }
   }
 
@@ -984,6 +1003,7 @@ export function App() {
               proposals={algoProposals}
               monitor={positionMonitor}
               riskSettings={riskSettings}
+              marketRegime={marketRegime}
               busy={busy}
               onRunScan={() => {
                 setWorkspaceView("research");
@@ -1170,6 +1190,7 @@ function OverviewPanel({
   proposals,
   monitor,
   riskSettings,
+  marketRegime,
   busy,
   onRunScan,
   onFindOpportunities,
@@ -1183,6 +1204,7 @@ function OverviewPanel({
   proposals: AlgoTradeProposal[];
   monitor: PositionMonitorSnapshot | null;
   riskSettings: RiskSettings | null;
+  marketRegime: MarketRegimeSnapshot | null;
   busy: string | null;
   onRunScan: () => void;
   onFindOpportunities: () => void;
@@ -1194,6 +1216,7 @@ function OverviewPanel({
   const exitsSuggested = monitor?.summary.exitsSuggested ?? 0;
   const openPositions = positions?.positions.length ?? 0;
   const selectedLabel = activeSignal ? `${activeSignal.symbol} - ${activeSignal.bias}, score ${activeSignal.score}` : "Select or scan a ticker";
+  const regimeTone = marketRegime?.regime ?? "neutral";
 
   return (
     <section className="overviewStack" aria-label="Overview">
@@ -1222,6 +1245,10 @@ function OverviewPanel({
       </section>
 
       <section className="overviewMetrics">
+        <article className={regimeTone}>
+          <span>Market regime</span>
+          <strong>{marketRegime ? formatRegimeLabel(marketRegime.regime) : "Unavailable"}</strong>
+        </article>
         <article>
           <span>Equity</span>
           <strong>{formatCurrency(account?.equity)}</strong>
@@ -1245,6 +1272,19 @@ function OverviewPanel({
       </section>
 
       <section className="overviewGrid">
+        <article className="overviewCard">
+          <div>
+            <span>Broad market</span>
+            <strong>{marketRegime ? `${marketRegime.score}/100` : "No regime data"}</strong>
+          </div>
+          <p>
+            {marketRegime
+              ? `${marketRegime.explanation} Suggested risk multiplier: ${marketRegime.riskAdjustmentMultiplier}x.`
+              : "Market regime needs SPY and QQQ data from the server."}
+          </p>
+          {marketRegime?.warnings[0] && <small>{marketRegime.warnings[0]}</small>}
+        </article>
+
         <article className="overviewCard">
           <div>
             <span>Selected setup</span>
@@ -2391,6 +2431,10 @@ function formatCurrency(value?: number | null): string {
 
 function formatPct(value: number): string {
   return `${Math.round(value * 10000) / 100}%`;
+}
+
+function formatRegimeLabel(value: MarketRegimeSnapshot["regime"]): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function formatMovePct(value?: number | null): string {

@@ -344,24 +344,12 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       journalAction = order.side === "sell" ? "paper_short_candidate" : "paper_long_candidate";
       entryPrice = referencePrice ?? undefined;
     } else if (proposal.executionType === "long_option" && proposal.optionOrder) {
-      const optionOrder = {
-        ...proposal.optionOrder,
-        earningsChecked: true,
-        confirmedPaperOnly: true,
-        acceptedRisk: true
-      };
-      const maxRisk = (account.equity ?? 100000) * riskSettings.maxRiskPerTradePct;
-      if (!optionOrder.estimatedMaxLoss || optionOrder.estimatedMaxLoss > maxRisk) {
-        const updated = await store.updateAlgoTradeProposal(proposal.id, {
-          status: "blocked",
-          warnings: [...new Set([...proposal.warnings, "Estimated option max loss exceeds the configured per-trade risk limit."])]
-        });
-        response.status(400).json({ proposal: updated });
-        return;
-      }
-      brokerOrder = await alpaca.placePaperOptionOrder(optionOrder);
-      journalAction = "options_research_only";
-      entryPrice = optionOrder.limitPrice;
+      const updated = await store.updateAlgoTradeProposal(proposal.id, {
+        status: "blocked",
+        warnings: [...new Set([...proposal.warnings, "Options are analysis-only; paper option order placement is disabled."])]
+      });
+      response.status(400).json({ proposal: updated });
+      return;
     } else {
       response.status(400).json({ error: "This proposal is missing an executable paper order." });
       return;

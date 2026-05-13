@@ -443,6 +443,11 @@ h3 {
   line-height: 1.45;
 }
 
+.overviewCard small {
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
 .commandActions {
   display: grid;
   gap: 8px;
@@ -455,7 +460,7 @@ h3 {
 
 .overviewMetrics {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -480,7 +485,24 @@ h3 {
   background: var(--warn-surface);
 }
 
-.overviewMetrics article.danger {
+.overviewMetrics article.bullish {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.overviewMetrics article.neutral {
+  border-color: var(--border);
+}
+
+.overviewMetrics article.caution {
+  border-color: var(--warn-border);
+  color: var(--warn-text);
+  background: var(--warn-surface);
+}
+
+.overviewMetrics article.danger,
+.overviewMetrics article.bearish {
   border-color: var(--danger-border);
   color: var(--danger-text);
   background: var(--danger-surface);

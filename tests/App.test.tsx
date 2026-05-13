@@ -60,6 +60,17 @@ describe("dashboard", () => {
       if (target.endsWith("/api/opportunities/scan")) {
         return jsonResponse({ scan: makeOpportunityScan(), cached: false });
       }
+      if (target.endsWith("/api/market/regime")) {
+        return jsonResponse({
+          regime: "bullish",
+          score: 78,
+          explanation: "Broad-market trend is supportive.",
+          riskAdjustmentMultiplier: 1,
+          warnings: [],
+          generatedAt: "2026-05-13T14:00:00.000Z",
+          components: []
+        });
+      }
       if (target.endsWith("/api/algo/proposals")) {
         return jsonResponse(algoProposals);
       }
@@ -89,6 +100,8 @@ describe("dashboard", () => {
     expect(screen.getByRole("button", { name: /^Research$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Orders$/i })).toBeInTheDocument();
     expect(screen.getByText("Today")).toBeInTheDocument();
+    expect(await screen.findByText("Market regime")).toBeInTheDocument();
+    expect(screen.getByText("Bullish")).toBeInTheDocument();
     expect(screen.getAllByText("Run scan").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: /^Research$/i }));

@@ -67,7 +67,7 @@ describe("algo trade proposals", () => {
     expect(short?.order?.takeProfitPrice).toBeLessThan(100);
   });
 
-  it("creates executable single-leg long option proposals when max loss fits risk", () => {
+  it("keeps long option proposals analysis-only even when max loss fits risk", () => {
     const settings = getDefaultRiskSettings();
     const analysisRun = buildAnalysisRun({
       mode: "fast",
@@ -102,11 +102,11 @@ describe("algo trade proposals", () => {
     });
 
     const call = proposals.find((proposal) => proposal.strategyKind === "long_call");
-    expect(call?.executable).toBe(true);
-    expect(call?.executionType).toBe("long_option");
+    expect(call?.executable).toBe(false);
+    expect(call?.executionType).toBe("research_only");
     expect(call?.horizon).toBe("options_short_term");
-    expect(call?.optionOrder?.contractSymbol).toBe("AAPL260619C00145000");
-    expect(call?.optionOrder?.timeInForce).toBe("day");
+    expect(call?.optionOrder).toBeUndefined();
+    expect(call?.warnings.join(" ")).toMatch(/Options are analysis-only/);
   });
 });
 
