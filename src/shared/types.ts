@@ -1,4 +1,5 @@
 export type SignalBias = "bullish" | "neutral" | "bearish" | "caution";
+export type MarketRegimeLabel = "bullish" | "neutral" | "bearish" | "caution";
 export type TrendState = "uptrend" | "downtrend" | "range" | "insufficient_data";
 export type OrderSide = "buy" | "sell";
 export type OrderTimeInForce = "day" | "gtc";
@@ -77,6 +78,30 @@ export interface SignalSnapshot {
   riskDollars: number | null;
   notes: string[];
   bars: Bar[];
+}
+
+export interface MarketRegimeComponent {
+  symbol: string;
+  price: number | null;
+  sma20: number | null;
+  sma50: number | null;
+  sma200: number | null;
+  momentum20Pct: number | null;
+  momentum60Pct: number | null;
+  drawdownFromHighPct: number | null;
+  atrPct: number | null;
+  score: number;
+  warnings: string[];
+}
+
+export interface MarketRegimeSnapshot {
+  regime: MarketRegimeLabel;
+  score: number;
+  explanation: string;
+  riskAdjustmentMultiplier: number;
+  warnings: string[];
+  generatedAt: string;
+  components: MarketRegimeComponent[];
 }
 
 export interface RiskProfile {

@@ -84,7 +84,8 @@ describe("paper order validation", () => {
         acceptedRisk: true
       },
       riskProfile,
-      100
+      100,
+      { now: new Date("2026-05-13T14:00:00.000Z") }
     );
 
     expect(result.ok).toBe(true);

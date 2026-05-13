@@ -8,6 +8,7 @@ import { createTradePlanner } from "./ai";
 import { getConfig, isPaperAlpacaUrl, type AppConfig } from "./config";
 import { TradeContextService } from "./context";
 import { buildSignalSnapshot, getDefaultRiskProfile } from "./indicators";
+import { buildMarketRegimeSnapshot } from "./marketRegime";
 import { buildOpportunityScan, dateKey } from "./opportunities";
 import { enrichOptionIdeas } from "./options";
 import { buildPositionMonitorSnapshot } from "./positionMonitor";
@@ -171,6 +172,14 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       getBars: (symbol) => alpaca.getBars(symbol)
     });
     response.json({ scan: await store.saveOpportunityScan(scan), cached: false });
+  }));
+
+  app.get("/api/market/regime", asyncHandler(async (_request, response) => {
+    const [spyBars, qqqBars] = await Promise.all([
+      alpaca.getBars("SPY"),
+      alpaca.getBars("QQQ")
+    ]);
+    response.json(buildMarketRegimeSnapshot({ spyBars, qqqBars }));
   }));
 
   app.get("/api/symbol/:symbol", asyncHandler(async (request, response) => {

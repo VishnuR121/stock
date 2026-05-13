@@ -260,6 +260,29 @@ describe("API safety behavior", () => {
     expect(barRequests).toBe(5);
   });
 
+  it("returns a SPY and QQQ market regime snapshot", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes("/v2/stocks/SPY/bars") || target.includes("/v2/stocks/QQQ/bars")) {
+        return jsonResponse({ bars: makeBars() });
+      }
+      return jsonResponse({});
+    });
+
+    const app = createApp({
+      alpacaKeyId: "key",
+      alpacaSecretKey: "secret",
+      databaseUrl: undefined,
+      dataFilePath: `data/test-market-regime-${Date.now()}.json`
+    });
+
+    const response = await request(app).get("/api/market/regime").expect(200);
+
+    expect(response.body.regime).toBe("bullish");
+    expect(response.body.components.map((component: { symbol: string }) => component.symbol)).toEqual(["SPY", "QQQ"]);
+    expect(response.body.riskAdjustmentMultiplier).toBe(1);
+  });
+
   it("reuses cached symbol snapshots to avoid repeated market data calls", async () => {
     let accountRequests = 0;
     let barRequests = 0;
