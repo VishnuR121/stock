@@ -8,6 +8,12 @@ import type {
   RiskSettings,
   StrategyCandidate
 } from "../src/shared/types";
+import {
+  checkDayOrderTargetRealism,
+  deriveTradeHorizon,
+  expectedHoldingPeriod,
+  selectDefaultTimeInForce
+} from "../src/shared/orderHorizon";
 import { round } from "./indicators";
 import { validatePaperOrder } from "./validation";
 
@@ -16,6 +22,7 @@ interface BuildAlgoProposalInput {
   account: BrokerAccountSnapshot | { equity?: number | null };
   riskSettings: RiskSettings;
   referencePrice?: number | null;
+  now?: Date;
 }
 
 const PROPOSAL_LIMIT = 5;
@@ -25,8 +32,11 @@ export function buildAlgoTradeProposals(input: BuildAlgoProposalInput): AlgoTrad
   const selected = selectStrategies(input.analysisRun.strategyCandidates);
   const now = new Date().toISOString();
   const proposals = selected.map((strategy, index) => {
-    const order = buildPaperOrder(strategy, input);
-    const optionOrder = buildOptionOrder(strategy, input);
+    const horizon = deriveTradeHorizon({ strategyKind: strategy.kind, signal: input.analysisRun.snapshot });
+    const holdingPeriod = expectedHoldingPeriod(horizon);
+    const referencePrice = input.referencePrice ?? input.analysisRun.snapshot.lastPrice;
+    const order = buildPaperOrder(strategy, input, horizon);
+    const optionOrder = buildOptionOrder(strategy, input, horizon);
     const validation = order
       ? validatePaperOrder(
           { ...order, earningsChecked: true, confirmedPaperOnly: true, acceptedRisk: true },
@@ -37,8 +47,12 @@ export function buildAlgoTradeProposals(input: BuildAlgoProposalInput): AlgoTrad
             maxDailyLossPct: input.riskSettings.maxDailyLossPct,
             minRiskReward: input.riskSettings.minRiskReward
           },
-          input.referencePrice ?? input.analysisRun.snapshot.lastPrice
+          referencePrice,
+          { now: input.now }
         )
+      : undefined;
+    const targetRealism = order
+      ? checkDayOrderTargetRealism({ order, referencePrice, now: input.now })
       : undefined;
     const executable = Boolean(
       !hardBlocked &&
@@ -58,6 +72,8 @@ export function buildAlgoTradeProposals(input: BuildAlgoProposalInput): AlgoTrad
       direction: strategy.direction,
       status: hardBlocked ? "blocked" : "queued",
       executionType: getExecutionType(strategy, order, optionOrder),
+      horizon,
+      expectedHoldingPeriod: holdingPeriod,
       executable,
       score: strategy.score,
       summary: strategy.summary,
@@ -66,13 +82,15 @@ export function buildAlgoTradeProposals(input: BuildAlgoProposalInput): AlgoTrad
       warnings: buildWarnings(strategy, validation, hardBlocked),
       order,
       optionOrder,
-      validation
+      validation,
+      targetRealism
     } satisfies AlgoTradeProposal;
   });
 
   if (proposals.length) return proposals;
 
   const snapshot = input.analysisRun.snapshot;
+  const horizon = deriveTradeHorizon({ signal: snapshot });
   return [{
     id: `algo-${input.analysisRun.symbol}-${Date.now()}-watch`,
     createdAt: now,
@@ -85,6 +103,8 @@ export function buildAlgoTradeProposals(input: BuildAlgoProposalInput): AlgoTrad
     direction: "neutral",
     status: "blocked",
     executionType: "research_only",
+    horizon,
+    expectedHoldingPeriod: expectedHoldingPeriod(horizon),
     executable: false,
     score: snapshot.score,
     summary: "The algo did not find a trade candidate clean enough for the approval queue.",
@@ -108,7 +128,7 @@ function selectStrategies(strategies: StrategyCandidate[]): StrategyCandidate[] 
   return merged.slice(0, PROPOSAL_LIMIT);
 }
 
-function buildPaperOrder(strategy: StrategyCandidate, input: BuildAlgoProposalInput): PaperOrderRequest | undefined {
+function buildPaperOrder(strategy: StrategyCandidate, input: BuildAlgoProposalInput, horizon: ReturnType<typeof deriveTradeHorizon>): PaperOrderRequest | undefined {
   if (strategy.kind !== "long_stock" && strategy.kind !== "short_stock") return undefined;
   const snapshot = input.analysisRun.snapshot;
   if (!snapshot.lastPrice) return undefined;
@@ -130,14 +150,15 @@ function buildPaperOrder(strategy: StrategyCandidate, input: BuildAlgoProposalIn
     quantity,
     stopLossPrice: riskPlan.stopLossPrice,
     takeProfitPrice: riskPlan.takeProfitPrice,
-    timeInForce: "day",
+    timeInForce: selectDefaultTimeInForce({ horizon, assetClass: "stock", strategyKind: strategy.kind }),
+    horizon,
     earningsChecked: false,
     confirmedPaperOnly: false,
     acceptedRisk: false
   };
 }
 
-function buildOptionOrder(strategy: StrategyCandidate, input: BuildAlgoProposalInput): OptionOrderRequest | undefined {
+function buildOptionOrder(strategy: StrategyCandidate, input: BuildAlgoProposalInput, horizon: ReturnType<typeof deriveTradeHorizon>): OptionOrderRequest | undefined {
   if (strategy.kind !== "long_call" && strategy.kind !== "long_put") return undefined;
   if (strategy.suitability !== "research" || !strategy.representativeContract) return undefined;
   const maxLoss = strategy.estimatedMaxLoss ?? null;
@@ -151,7 +172,8 @@ function buildOptionOrder(strategy: StrategyCandidate, input: BuildAlgoProposalI
     orderType: "limit",
     quantity: 1,
     limitPrice: premium,
-    timeInForce: "day",
+    timeInForce: selectDefaultTimeInForce({ horizon, assetClass: "option", strategyKind: strategy.kind }),
+    horizon,
     estimatedPremium: premium,
     estimatedMaxLoss: maxLoss,
     earningsChecked: false,

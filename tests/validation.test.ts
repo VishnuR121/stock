@@ -13,7 +13,8 @@ describe("paper order validation", () => {
         quantity: 10,
         stopLossPrice: 95,
         takeProfitPrice: 112,
-        timeInForce: "day",
+        timeInForce: "gtc",
+        horizon: "swing",
         earningsChecked: true,
         confirmedPaperOnly: true,
         acceptedRisk: true
@@ -90,6 +91,56 @@ describe("paper order validation", () => {
     expect(result.warnings.join(" ")).toMatch(/Risk\/reward/);
   });
 
+  it("blocks unrealistic late-session DAY targets", () => {
+    const result = validatePaperOrder(
+      {
+        symbol: "XLI",
+        side: "buy",
+        orderType: "market",
+        quantity: 1,
+        stopLossPrice: 99,
+        takeProfitPrice: 105.3,
+        timeInForce: "day",
+        horizon: "intraday",
+        earningsChecked: true,
+        confirmedPaperOnly: true,
+        acceptedRisk: true
+      },
+      riskProfile,
+      100,
+      { now: new Date("2026-05-13T19:24:00.000Z") }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.targetRealism?.minutesUntilSessionClose).toBe(36);
+    expect(result.errors.join(" ")).toMatch(/Target is \+5\.3% away with 36 minutes left/);
+  });
+
+  it("allows realistic intraday DAY targets", () => {
+    const result = validatePaperOrder(
+      {
+        symbol: "XLI",
+        side: "buy",
+        orderType: "market",
+        quantity: 10,
+        stopLossPrice: 99.8,
+        takeProfitPrice: 100.4,
+        timeInForce: "day",
+        horizon: "intraday",
+        earningsChecked: true,
+        confirmedPaperOnly: true,
+        acceptedRisk: true
+      },
+      riskProfile,
+      100,
+      { now: new Date("2026-05-13T19:24:00.000Z") }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.targetRealism?.targetDistancePct).toBe(0.4);
+    expect(result.targetRealism?.severity).toBe("info");
+  });
+
   it("accepts a conservative short equity paper order", () => {
     const result = validatePaperOrder(
       {
@@ -99,7 +150,8 @@ describe("paper order validation", () => {
         quantity: 10,
         stopLossPrice: 105,
         takeProfitPrice: 90,
-        timeInForce: "day",
+        timeInForce: "gtc",
+        horizon: "swing",
         earningsChecked: true,
         confirmedPaperOnly: true,
         acceptedRisk: true

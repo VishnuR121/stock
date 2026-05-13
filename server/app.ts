@@ -270,12 +270,12 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       return;
     }
 
-    const account = await alpaca.getAccount();
     const riskSettings = await store.getRiskSettings();
     if (riskSettings.killSwitchEnabled) {
       response.status(423).json({ error: "Paper order entry is disabled because the kill switch is enabled." });
       return;
     }
+    const account = await alpaca.getAccount();
     const riskProfile = getRiskProfile(account.equity ?? 100000, riskSettings);
     let brokerOrder: unknown;
     let validation: (PaperOrderValidationResult & { order?: PaperOrderRequest }) | undefined = proposal.validation;
@@ -295,6 +295,7 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
         const updated = await store.updateAlgoTradeProposal(proposal.id, {
           status: "blocked",
           validation,
+          targetRealism: validation.targetRealism,
           warnings: [...new Set([...proposal.warnings, ...validation.errors])]
         });
         response.status(400).json({ proposal: updated, validation });
@@ -330,6 +331,7 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
     const updated = await store.updateAlgoTradeProposal(proposal.id, {
       status: "placed",
       validation,
+      targetRealism: validation?.targetRealism,
       brokerOrder,
       reviewedAt: new Date().toISOString()
     });
@@ -470,7 +472,6 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       return;
     }
 
-    const account = await alpaca.getAccount();
     const riskSettings = await store.getRiskSettings();
     if (riskSettings.killSwitchEnabled) {
       response.status(423).json({
@@ -482,6 +483,7 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       });
       return;
     }
+    const account = await alpaca.getAccount();
     const riskProfile = getRiskProfile(account.equity ?? 100000, riskSettings);
     const orderInput = parsed.data as PaperOrderRequest;
     const referencePrice = await getReferencePrice(alpaca, orderInput.symbol);

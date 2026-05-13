@@ -10,6 +10,7 @@ export type TradeAction =
   | "paper_long_candidate"
   | "paper_short_candidate"
   | "options_research_only";
+export type TradeHorizon = "intraday" | "swing" | "position" | "options_short_term";
 export type JournalStatus = "watching" | "paper_open" | "paper_closed" | "skipped";
 export type SpecialistKind = "technical" | "market" | "fundamentals" | "options" | "risk" | "journal";
 export type SafetySeverity = "info" | "warning" | "blocker";
@@ -219,6 +220,29 @@ export interface SafetyBlocker {
   message: string;
 }
 
+export interface OrderLevelDistances {
+  referencePrice: number;
+  targetDistancePct: number;
+  stopDistancePct: number;
+  targetMovePct: number;
+  stopMovePct: number;
+}
+
+export interface TargetRealismResult {
+  ok: boolean;
+  severity: SafetySeverity;
+  horizon: TradeHorizon;
+  expectedHoldingPeriod: string;
+  timeInForce: OrderTimeInForce;
+  minutesUntilSessionClose: number | null;
+  targetDistancePct: number | null;
+  stopDistancePct: number | null;
+  targetMovePct: number | null;
+  stopMovePct: number | null;
+  maxRealisticTargetPct: number | null;
+  message?: string;
+}
+
 export interface ManagerScenario {
   label: "bullish" | "base" | "bearish";
   summary: string;
@@ -285,6 +309,8 @@ export interface AlgoTradeProposal {
   direction: StrategyCandidate["direction"];
   status: AlgoProposalStatus;
   executionType: AlgoExecutionType;
+  horizon: TradeHorizon;
+  expectedHoldingPeriod: string;
   executable: boolean;
   score: number;
   summary: string;
@@ -294,6 +320,7 @@ export interface AlgoTradeProposal {
   order?: PaperOrderRequest;
   optionOrder?: OptionOrderRequest;
   validation?: PaperOrderValidationResult;
+  targetRealism?: TargetRealismResult;
   brokerOrder?: unknown;
   reviewedAt?: string;
   rejectionReason?: string;
@@ -404,6 +431,7 @@ export interface PaperOrderRequest {
   stopLossPrice: number;
   takeProfitPrice: number;
   timeInForce: OrderTimeInForce;
+  horizon: TradeHorizon;
   earningsChecked: boolean;
   confirmedPaperOnly: boolean;
   acceptedRisk: boolean;
@@ -417,6 +445,7 @@ export interface OptionOrderRequest {
   quantity: number;
   limitPrice?: number;
   timeInForce: OrderTimeInForce;
+  horizon: TradeHorizon;
   estimatedPremium: number | null;
   estimatedMaxLoss: number | null;
   earningsChecked: boolean;
@@ -430,6 +459,8 @@ export interface PaperOrderValidationResult {
   warnings: string[];
   estimatedNotional: number | null;
   estimatedRisk: number | null;
+  levelDistances?: OrderLevelDistances;
+  targetRealism?: TargetRealismResult;
 }
 
 export interface OptionIdea {

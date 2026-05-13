@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { PaperOrderRequest, PaperOrderValidationResult, RiskProfile } from "../src/shared/types";
+import { calculateOrderLevelDistances, checkDayOrderTargetRealism, TRADE_HORIZONS } from "../src/shared/orderHorizon";
 import { round } from "./indicators";
 
 const symbolSchema = z
@@ -25,6 +26,7 @@ export const paperOrderSchema = z
     stopLossPrice: z.number().positive(),
     takeProfitPrice: z.number().positive(),
     timeInForce: z.enum(["day", "gtc"]),
+    horizon: z.enum(TRADE_HORIZONS).default("intraday"),
     earningsChecked: z.boolean(),
     confirmedPaperOnly: z.boolean(),
     acceptedRisk: z.boolean()
@@ -49,7 +51,8 @@ export function isValidEquitySymbol(symbol: string): boolean {
 export function validatePaperOrder(
   input: unknown,
   riskProfile: RiskProfile,
-  referencePrice?: number | null
+  referencePrice?: number | null,
+  options: { now?: Date } = {}
 ): PaperOrderValidationResult & { order?: PaperOrderRequest } {
   const parsed = paperOrderSchema.safeParse(input);
   if (!parsed.success) {
@@ -99,12 +102,27 @@ export function validatePaperOrder(
     }
   }
 
+  const levelDistances = calculateOrderLevelDistances(order, entryPrice);
+  const targetRealism = checkDayOrderTargetRealism({
+    order,
+    referencePrice: entryPrice,
+    now: options.now
+  });
+
+  if (!targetRealism.ok && targetRealism.message) {
+    errors.push(targetRealism.message);
+  } else if (targetRealism.severity === "warning" && targetRealism.message) {
+    warnings.push(targetRealism.message);
+  }
+
   return {
     ok: errors.length === 0,
     errors,
     warnings,
     estimatedNotional,
     estimatedRisk,
+    levelDistances,
+    targetRealism,
     order
   };
 }

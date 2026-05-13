@@ -1102,7 +1102,8 @@ select {
 }
 
 .checkboxStack,
-.orderForm .wideButton {
+.orderForm .wideButton,
+.orderPreview {
   grid-column: 1 / -1;
 }
 
@@ -1120,6 +1121,39 @@ select {
 .checkboxStack input {
   width: 18px;
   min-height: 18px;
+}
+
+.orderPreview,
+.realismNotice {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--info-border);
+  border-radius: 8px;
+  color: var(--info-text);
+  background: var(--info-surface);
+  font-size: 0.82rem;
+}
+
+.orderPreview span,
+.orderPreview small {
+  color: currentColor;
+  font-weight: 800;
+}
+
+.orderPreview.warning,
+.realismNotice.warning {
+  border-color: var(--warn-border);
+  color: var(--warn-text);
+  background: var(--warn-surface);
+}
+
+.orderPreview.blocker,
+.realismNotice.blocker {
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+  background: var(--danger-surface);
 }
 
 .tradePlan {

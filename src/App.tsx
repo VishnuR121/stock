@@ -37,11 +37,19 @@ import type {
   SavedTradePlan,
   SignalSnapshot,
   TradeAction,
+  TradeHorizon,
   TradeContext,
   TradeJournalEntry,
   TradePlan,
   WatchlistItem
 } from "./shared/types";
+import {
+  checkDayOrderTargetRealism,
+  deriveTradeHorizon,
+  expectedHoldingPeriod,
+  formatHorizon,
+  selectDefaultTimeInForce
+} from "./shared/orderHorizon";
 
 type PositionsResponse = {
   positions: unknown[];
@@ -66,6 +74,7 @@ const emptyOrder: PaperOrderRequest = {
   stopLossPrice: 0,
   takeProfitPrice: 0,
   timeInForce: "day",
+  horizon: "intraday",
   earningsChecked: false,
   confirmedPaperOnly: false,
   acceptedRisk: false
@@ -110,11 +119,14 @@ export function App() {
 
   useEffect(() => {
     if (!activeSignal) return;
+    const horizon = deriveTradeHorizon({ signal: activeSignal });
     setOrderDraft((draft) => ({
       ...draft,
       symbol: activeSignal.symbol,
       stopLossPrice: activeSignal.suggestedStop ?? draft.stopLossPrice,
-      takeProfitPrice: activeSignal.suggestedTarget ?? draft.takeProfitPrice
+      takeProfitPrice: activeSignal.suggestedTarget ?? draft.takeProfitPrice,
+      horizon,
+      timeInForce: selectDefaultTimeInForce({ horizon, assetClass: "stock" })
     }));
     void loadOptions(activeSignal.symbol);
     void loadAnalysisHistory(activeSignal.symbol);
@@ -126,6 +138,11 @@ export function App() {
   const activePlanRecord = activeSignal ? tradePlans[activeSignal.symbol] : undefined;
   const activeTradePlan = activePlanRecord?.plan ?? null;
   const activeAnalysis = activeSignal ? analysisRuns[activeSignal.symbol] : null;
+  const orderReferencePrice = orderDraft.orderType === "limit" ? orderDraft.limitPrice ?? null : activeSignal?.lastPrice ?? null;
+  const orderTargetRealism = checkDayOrderTargetRealism({
+    order: orderDraft,
+    referencePrice: orderReferencePrice
+  });
 
   async function refreshBasics() {
     setBusy("refresh");
@@ -861,6 +878,7 @@ export function App() {
                   activeSignal={activeSignal}
                   orderDraft={orderDraft}
                   setOrderDraft={setOrderDraft}
+                  targetRealism={orderTargetRealism}
                   onReview={() => setReviewingOrder(true)}
                 />
               </section>
@@ -928,15 +946,36 @@ export function App() {
                 <dd>{orderDraft.quantity ? `${orderDraft.quantity} shares` : formatCurrency(orderDraft.notional)}</dd>
               </div>
               <div>
+                <dt>Horizon</dt>
+                <dd>{formatHorizon(orderDraft.horizon)}</dd>
+              </div>
+              <div>
+                <dt>Holding</dt>
+                <dd>{expectedHoldingPeriod(orderDraft.horizon)}</dd>
+              </div>
+              <div>
+                <dt>TIF</dt>
+                <dd>{orderDraft.timeInForce.toUpperCase()}</dd>
+              </div>
+              <div>
+                <dt>Reference</dt>
+                <dd>{formatCurrency(orderReferencePrice)}</dd>
+              </div>
+              <div>
                 <dt>Stop</dt>
-                <dd>{formatCurrency(orderDraft.stopLossPrice)}</dd>
+                <dd>{formatCurrency(orderDraft.stopLossPrice)} {formatMovePct(orderTargetRealism.stopMovePct)}</dd>
               </div>
               <div>
                 <dt>Target</dt>
-                <dd>{formatCurrency(orderDraft.takeProfitPrice)}</dd>
+                <dd>{formatCurrency(orderDraft.takeProfitPrice)} {formatMovePct(orderTargetRealism.targetMovePct)}</dd>
               </div>
             </dl>
-            <button className="wideButton danger" onClick={submitPaperOrder} disabled={busy === "order"}>
+            {orderTargetRealism.message && (
+              <p className={`realismNotice ${orderTargetRealism.severity}`}>
+                {orderTargetRealism.message}
+              </p>
+            )}
+            <button className="wideButton danger" onClick={submitPaperOrder} disabled={busy === "order" || !orderTargetRealism.ok}>
               {busy === "order" ? <Loader2 className="spin" size={17} /> : <CheckCircle2 size={17} />}
               <span>Submit paper order</span>
             </button>
@@ -1125,14 +1164,18 @@ function AlgoCommandCenter({
               <p>{proposal.summary}</p>
               <div className="strategyStats">
                 <span>Score {proposal.score}</span>
-                <span>{proposal.executable ? "Executable paper bracket" : "Research only"}</span>
+                <span>{proposal.executable ? `Executable ${formatHorizon(proposal.horizon ?? "intraday")} ${proposal.order ? "stock bracket" : "option entry"}` : "Research only"}</span>
+                <span>{proposal.expectedHoldingPeriod ?? expectedHoldingPeriod(proposal.horizon ?? "intraday")}</span>
+                {proposal.order && <span>TIF {proposal.order.timeInForce.toUpperCase()}</span>}
+                {proposal.optionOrder && <span>TIF {proposal.optionOrder.timeInForce.toUpperCase()}</span>}
                 {proposal.order && <span>{proposal.order.quantity} shares</span>}
                 {proposal.optionOrder && <span>{proposal.optionOrder.contractSymbol}</span>}
                 {proposal.optionOrder && <span>{proposal.optionOrder.quantity} contract</span>}
                 {proposal.optionOrder?.limitPrice && <span>Limit {formatCurrency(proposal.optionOrder.limitPrice)}</span>}
-                {proposal.order && <span>Stop {formatCurrency(proposal.order.stopLossPrice)}</span>}
-                {proposal.order && <span>Target {formatCurrency(proposal.order.takeProfitPrice)}</span>}
+                {proposal.order && <span>Stop {formatCurrency(proposal.order.stopLossPrice)} {formatMovePct(proposal.targetRealism?.stopMovePct ?? proposal.validation?.levelDistances?.stopMovePct)}</span>}
+                {proposal.order && <span>Target {formatCurrency(proposal.order.takeProfitPrice)} {formatMovePct(proposal.targetRealism?.targetMovePct ?? proposal.validation?.levelDistances?.targetMovePct)}</span>}
               </div>
+              {proposal.targetRealism?.message && <small>{proposal.targetRealism.message}</small>}
               {proposal.warnings[0] && <small>{proposal.warnings[0]}</small>}
               <div className="algoActions">
                 <button
@@ -1353,11 +1396,13 @@ function PaperOrderForm({
   activeSignal,
   orderDraft,
   setOrderDraft,
+  targetRealism,
   onReview
 }: {
   activeSignal: SignalSnapshot | null;
   orderDraft: PaperOrderRequest;
   setOrderDraft: (next: PaperOrderRequest | ((draft: PaperOrderRequest) => PaperOrderRequest)) => void;
+  targetRealism: ReturnType<typeof checkDayOrderTargetRealism>;
   onReview: () => void;
 }) {
   const update = (patch: Partial<PaperOrderRequest>) => {
@@ -1375,6 +1420,23 @@ function PaperOrderForm({
         <select value={orderDraft.side} onChange={(event) => update({ side: event.target.value as "buy" | "sell" })}>
           <option value="buy">Buy / long</option>
           <option value="sell">Sell short</option>
+        </select>
+      </label>
+      <label>
+        <span>Horizon</span>
+        <select
+          value={orderDraft.horizon}
+          onChange={(event) => {
+            const horizon = event.target.value as TradeHorizon;
+            update({
+              horizon,
+              timeInForce: selectDefaultTimeInForce({ horizon, assetClass: "stock" })
+            });
+          }}
+        >
+          <option value="intraday">Intraday</option>
+          <option value="swing">Swing</option>
+          <option value="position">Position</option>
         </select>
       </label>
       <label>
@@ -1409,6 +1471,13 @@ function PaperOrderForm({
           <option value="gtc">GTC</option>
         </select>
       </label>
+      <div className={`orderPreview ${targetRealism.severity}`}>
+        <span>{formatHorizon(orderDraft.horizon)} - {expectedHoldingPeriod(orderDraft.horizon)}</span>
+        <strong>
+          Target {formatDistancePct(targetRealism.targetDistancePct)} / Stop {formatDistancePct(targetRealism.stopDistancePct)}
+        </strong>
+        {targetRealism.message && <small>{targetRealism.message}</small>}
+      </div>
       <div className="checkboxStack">
         <label>
           <input type="checkbox" checked={orderDraft.earningsChecked} onChange={(event) => update({ earningsChecked: event.target.checked })} />
@@ -1897,6 +1966,18 @@ function formatCurrency(value?: number | null): string {
 
 function formatPct(value: number): string {
   return `${Math.round(value * 10000) / 100}%`;
+}
+
+function formatMovePct(value?: number | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "";
+  const rounded = Math.round(value * 10) / 10;
+  return `(${rounded > 0 ? "+" : ""}${rounded}%)`;
+}
+
+function formatDistancePct(value?: number | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
+  const rounded = Math.round(value * 10) / 10;
+  return `${rounded}%`;
 }
 
 function formatOptionalPct(value?: number | null): string {

@@ -29,7 +29,10 @@ describe("algo trade proposals", () => {
     const long = proposals.find((proposal) => proposal.strategyKind === "long_stock");
     expect(long?.executable).toBe(true);
     expect(long?.executionType).toBe("long_stock_bracket");
+    expect(long?.horizon).toBe("swing");
+    expect(long?.expectedHoldingPeriod).toMatch(/days/i);
     expect(long?.order?.symbol).toBe("AAPL");
+    expect(long?.order?.timeInForce).toBe("gtc");
     expect(long?.order?.confirmedPaperOnly).toBe(false);
   });
 
@@ -57,6 +60,8 @@ describe("algo trade proposals", () => {
     const short = proposals.find((proposal) => proposal.strategyKind === "short_stock");
     expect(short?.executable).toBe(true);
     expect(short?.executionType).toBe("short_stock_bracket");
+    expect(short?.horizon).toBe("swing");
+    expect(short?.order?.timeInForce).toBe("gtc");
     expect(short?.order?.side).toBe("sell");
     expect(short?.order?.stopLossPrice).toBeGreaterThan(100);
     expect(short?.order?.takeProfitPrice).toBeLessThan(100);
@@ -99,7 +104,9 @@ describe("algo trade proposals", () => {
     const call = proposals.find((proposal) => proposal.strategyKind === "long_call");
     expect(call?.executable).toBe(true);
     expect(call?.executionType).toBe("long_option");
+    expect(call?.horizon).toBe("options_short_term");
     expect(call?.optionOrder?.contractSymbol).toBe("AAPL260619C00145000");
+    expect(call?.optionOrder?.timeInForce).toBe("day");
   });
 });
 

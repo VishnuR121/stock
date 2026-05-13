@@ -113,6 +113,37 @@ describe("API safety behavior", () => {
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/v2/orders"), expect.anything());
   });
 
+  it("kill switch blocks paper orders before broker calls", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => jsonResponse({}));
+    const app = createApp({
+      alpacaKeyId: "key",
+      alpacaSecretKey: "secret",
+      databaseUrl: undefined,
+      dataFilePath: `data/test-kill-switch-${Date.now()}.json`
+    });
+
+    await request(app).post("/api/settings/risk").send({ killSwitchEnabled: true }).expect(200);
+
+    const response = await request(app)
+      .post("/api/alpaca/paper-orders")
+      .send({
+        symbol: "SPY",
+        orderType: "market",
+        quantity: 1,
+        stopLossPrice: 95,
+        takeProfitPrice: 101,
+        timeInForce: "day",
+        horizon: "intraday",
+        earningsChecked: true,
+        confirmedPaperOnly: true,
+        acceptedRisk: true
+      })
+      .expect(423);
+
+    expect(response.body.errors.join(" ")).toMatch(/kill switch/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("closes a single paper position after explicit confirmation", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
       const target = String(url);
