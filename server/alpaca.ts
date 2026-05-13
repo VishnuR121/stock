@@ -21,6 +21,12 @@ interface AlpacaAccount {
   portfolio_value?: string;
 }
 
+interface GetBarsOptions {
+  limit?: number;
+  start?: string;
+  end?: string;
+}
+
 export class AlpacaClient {
   private readonly tradingBaseUrl: string;
   private readonly marketDataBaseUrl = "https://data.alpaca.markets";
@@ -61,7 +67,9 @@ export class AlpacaClient {
     return this.tradingRequest<unknown[]>("/v2/orders?status=all&limit=50&nested=true");
   }
 
-  async getBars(symbol: string, limit = 260): Promise<Bar[]> {
+  async getBars(symbol: string, input: number | GetBarsOptions = 260): Promise<Bar[]> {
+    const options = typeof input === "number" ? { limit: input } : input;
+    const limit = options.limit ?? 260;
     const start = new Date();
     start.setDate(start.getDate() - Math.ceil(limit * 2.2));
     const requestLimit = Math.max(limit, Math.ceil(limit * 2.5));
@@ -70,8 +78,9 @@ export class AlpacaClient {
       adjustment: "raw",
       feed: "iex",
       limit: String(requestLimit),
-      start: start.toISOString()
+      start: options.start ?? start.toISOString()
     });
+    if (options.end) params.set("end", options.end);
     const data = await this.marketDataRequest<{ bars?: AlpacaBar[] }>(`/v2/stocks/${symbol}/bars?${params.toString()}`);
     return (data.bars ?? []).map((bar) => ({
       timestamp: bar.t,

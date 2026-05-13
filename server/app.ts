@@ -4,6 +4,7 @@ import path from "node:path";
 import { AlpacaClient } from "./alpaca";
 import { buildAlgoTradeProposals } from "./algo";
 import { buildAnalysisRun, buildFallbackManagerVerdict, buildSafetyBlockers, buildSpecialistReports } from "./analysis";
+import { runBacktest } from "./backtest";
 import { createTradePlanner } from "./ai";
 import { getConfig, isPaperAlpacaUrl, type AppConfig } from "./config";
 import { TradeContextService } from "./context";
@@ -18,6 +19,7 @@ import { normalizeSymbol, paperOrderSchema, validatePaperOrder, watchlistItemSch
 import type {
   EnrichedTradePlanResponse,
   AlgoTradeProposal,
+  BacktestRequest,
   HealthStatus,
   JournalStatus,
   PaperOrderRequest,
@@ -180,6 +182,31 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       alpaca.getBars("QQQ")
     ]);
     response.json(buildMarketRegimeSnapshot({ spyBars, qqqBars }));
+  }));
+
+  app.post("/api/backtest", asyncHandler(async (request, response) => {
+    const backtestRequest = normalizeBacktestRequestBody(request.body);
+    if (!backtestRequest) {
+      response.status(400).json({ error: "Backtest requires symbols, startDate, and endDate." });
+      return;
+    }
+
+    const [account, riskSettings] = await Promise.all([safeAccount(alpaca), store.getRiskSettings()]);
+    const fetchOptions = getBacktestBarsOptions(backtestRequest);
+    const uniqueSymbols = [...new Set([...backtestRequest.symbols, "SPY"])];
+    const entries = await Promise.all(
+      uniqueSymbols.map(async (symbol) => [symbol, await alpaca.getBars(symbol, fetchOptions)] as const)
+    );
+    const barsBySymbol = Object.fromEntries(entries);
+    response.json(runBacktest({
+      request: {
+        ...backtestRequest,
+        initialEquity: backtestRequest.initialEquity ?? account.equity ?? 100000
+      },
+      barsBySymbol,
+      benchmarkBars: barsBySymbol.SPY ?? [],
+      riskSettings
+    }));
   }));
 
   app.get("/api/symbol/:symbol", asyncHandler(async (request, response) => {
@@ -601,6 +628,46 @@ function getSymbolsFromRequest(body: unknown): string[] {
   const request = body as { symbols?: unknown };
   if (!Array.isArray(request?.symbols)) return [];
   return request.symbols.map((symbol) => normalizeSymbol(String(symbol))).filter(Boolean).slice(0, 25);
+}
+
+function normalizeBacktestRequestBody(body: unknown): BacktestRequest | null {
+  const request = body as Partial<BacktestRequest> | undefined;
+  const symbols = Array.isArray(request?.symbols)
+    ? request.symbols.map((symbol) => normalizeSymbol(String(symbol))).filter(Boolean).slice(0, 25)
+    : [];
+  const startDate = typeof request?.startDate === "string" ? request.startDate.slice(0, 10) : "";
+  const endDate = typeof request?.endDate === "string" ? request.endDate.slice(0, 10) : "";
+  if (!symbols.length || !isValidDateKey(startDate) || !isValidDateKey(endDate) || startDate > endDate) return null;
+
+  return {
+    symbols,
+    startDate,
+    endDate,
+    holdingPeriodDays: optionalNumber(request?.holdingPeriodDays) ?? 10,
+    maxPositions: optionalNumber(request?.maxPositions) ?? 3,
+    minScore: optionalNumber(request?.minScore) ?? 70,
+    initialEquity: optionalNumber(request?.initialEquity),
+    riskPerTradePct: optionalNumber(request?.riskPerTradePct),
+    maxPositionPct: optionalNumber(request?.maxPositionPct),
+    minRiskReward: optionalNumber(request?.minRiskReward),
+    marketRegimeFilter: Array.isArray(request?.marketRegimeFilter) ? request.marketRegimeFilter : undefined
+  };
+}
+
+function getBacktestBarsOptions(request: BacktestRequest): { limit: number; start: string; end: string } {
+  const start = new Date(`${request.startDate}T00:00:00.000Z`);
+  const end = new Date(`${request.endDate}T23:59:59.000Z`);
+  start.setDate(start.getDate() - 340);
+  const days = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000));
+  return {
+    limit: Math.min(5000, Math.max(260, Math.ceil(days * 1.8))),
+    start: start.toISOString(),
+    end: end.toISOString()
+  };
+}
+
+function isValidDateKey(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(new Date(`${value}T00:00:00.000Z`).getTime());
 }
 
 async function safeAccount(alpaca: AlpacaClient) {

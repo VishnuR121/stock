@@ -283,6 +283,47 @@ describe("API safety behavior", () => {
     expect(response.body.riskAdjustmentMultiplier).toBe(1);
   });
 
+  it("runs a backtest from historical bars", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes("/v2/account")) {
+        return jsonResponse({
+          equity: "100000",
+          cash: "100000",
+          buying_power: "200000",
+          portfolio_value: "100000",
+          status: "ACTIVE",
+          currency: "USD"
+        });
+      }
+      if (target.includes("/v2/stocks/")) return jsonResponse({ bars: makeBars(320) });
+      return jsonResponse({});
+    });
+
+    const app = createApp({
+      alpacaKeyId: "key",
+      alpacaSecretKey: "secret",
+      databaseUrl: undefined,
+      dataFilePath: `data/test-backtest-${Date.now()}.json`
+    });
+
+    const response = await request(app)
+      .post("/api/backtest")
+      .send({
+        symbols: ["AAPL"],
+        startDate: "2026-03-01",
+        endDate: "2026-05-01",
+        holdingPeriodDays: 8,
+        maxPositions: 1,
+        minScore: 65
+      })
+      .expect(200);
+
+    expect(response.body.request.symbols).toEqual(["AAPL"]);
+    expect(response.body.equityCurve.length).toBeGreaterThan(0);
+    expect(response.body.benchmarkReturnPct).not.toBeNull();
+  });
+
   it("reuses cached symbol snapshots to avoid repeated market data calls", async () => {
     let accountRequests = 0;
     let barRequests = 0;
@@ -386,11 +427,11 @@ function jsonResponse(body: unknown, status = 200) {
   );
 }
 
-function makeBars() {
-  return Array.from({ length: 260 }, (_, index) => {
+function makeBars(count = 260) {
+  return Array.from({ length: count }, (_, index) => {
     const close = 100 + index * 0.8;
     return {
-      t: new Date(Date.now() - (260 - index) * 86400000).toISOString(),
+      t: new Date(Date.now() - (count - index) * 86400000).toISOString(),
       o: close - 0.5,
       h: close + 1,
       l: close - 1,

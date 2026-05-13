@@ -445,6 +445,65 @@ export interface OpportunityScan {
   }>;
 }
 
+export interface BacktestRequest {
+  symbols: string[];
+  startDate: string;
+  endDate: string;
+  holdingPeriodDays: number;
+  maxPositions: number;
+  minScore: number;
+  initialEquity?: number;
+  riskPerTradePct?: number;
+  maxPositionPct?: number;
+  minRiskReward?: number;
+  marketRegimeFilter?: MarketRegimeLabel[];
+}
+
+export type BacktestExitReason = "stop" | "target" | "holding_period" | "score_drop" | "market_regime" | "end_of_data";
+
+export interface BacktestTrade {
+  id: string;
+  symbol: string;
+  side: "long";
+  entryDate: string;
+  exitDate: string;
+  entryPrice: number;
+  exitPrice: number;
+  quantity: number;
+  stopLossPrice: number;
+  targetPrice: number;
+  entryScore: number;
+  exitReason: BacktestExitReason;
+  pnl: number;
+  pnlPct: number;
+  rMultiple: number;
+  riskDollars: number;
+}
+
+export interface BacktestEquityPoint {
+  date: string;
+  equity: number;
+  benchmarkEquity: number | null;
+  drawdownPct: number;
+}
+
+export interface BacktestResult {
+  generatedAt: string;
+  request: BacktestRequest;
+  totalReturnPct: number;
+  annualizedReturnPct: number | null;
+  winRate: number;
+  averageWin: number;
+  averageLoss: number;
+  maxDrawdownPct: number;
+  numberOfTrades: number;
+  profitFactor: number | null;
+  benchmarkReturnPct: number | null;
+  equityCurve: BacktestEquityPoint[];
+  trades: BacktestTrade[];
+  warnings: string[];
+}
+
 export interface TradingViewSignal {
   id: string;
   createdAt: string;
