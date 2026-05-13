@@ -167,6 +167,34 @@ export interface TradePlan {
   warnings: string[];
 }
 
+export interface TradePlanPriceZone {
+  low: number | null;
+  high: number | null;
+}
+
+export interface DeterministicTradePlan {
+  symbol: string;
+  generatedAt: string;
+  currentPrice: number | null;
+  marketRegime: MarketRegimeSnapshot | null;
+  bias: SignalBias;
+  action: TradeAction;
+  entryZone: TradePlanPriceZone;
+  stopLoss: number | null;
+  conservativeTarget: number | null;
+  aggressiveTarget: number | null;
+  riskReward: number | null;
+  positionSizeShares: number | null;
+  positionNotional: number | null;
+  maxRiskDollars: number | null;
+  invalidationCondition: string;
+  timeHorizon: string;
+  keyReasons: string[];
+  keyRisks: string[];
+  warnings: string[];
+  ranking: RankedSetup;
+}
+
 export interface FundamentalSnapshot {
   source: string;
   name?: string;

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
-import type { AlgoTradeProposal, OpportunityScan, SignalSnapshot } from "../src/shared/types";
+import type { AlgoTradeProposal, DeterministicTradePlan, OpportunityScan, SignalSnapshot } from "../src/shared/types";
 
 describe("dashboard", () => {
   let watchlistPosts: string[];
@@ -73,6 +73,9 @@ describe("dashboard", () => {
       }
       if (target.endsWith("/api/backtest")) {
         return jsonResponse(makeBacktestResult());
+      }
+      if (target.endsWith("/api/trade-plan/deterministic")) {
+        return jsonResponse(makeQuantPlan());
       }
       if (target.endsWith("/api/algo/proposals")) {
         return jsonResponse(algoProposals);
@@ -158,6 +161,8 @@ describe("dashboard", () => {
     expect(screen.getByText("Trend 90")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Analyze/i }));
     expect(await screen.findByText("TSLA loaded for analysis.")).toBeInTheDocument();
+    expect(await screen.findByText("$248 - $252")).toBeInTheDocument();
+    expect(screen.getByText("Max risk")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /^Add$/i }));
     await waitFor(() => expect(watchlistPosts[0]).toContain("TSLA"));
@@ -296,6 +301,61 @@ function makeSnapshot(): SignalSnapshot {
     riskDollars: 480,
     notes: [],
     bars
+  };
+}
+
+function makeQuantPlan(): DeterministicTradePlan {
+  const snapshot = makeSnapshot();
+  return {
+    symbol: snapshot.symbol,
+    generatedAt: "2026-05-13T14:00:00.000Z",
+    currentPrice: snapshot.lastPrice,
+    marketRegime: {
+      regime: "bullish",
+      score: 78,
+      explanation: "Broad-market trend is supportive.",
+      riskAdjustmentMultiplier: 1,
+      warnings: [],
+      generatedAt: "2026-05-13T14:00:00.000Z",
+      components: []
+    },
+    bias: "bullish",
+    action: "paper_long_candidate",
+    entryZone: { low: 248, high: 252 },
+    stopLoss: snapshot.suggestedStop,
+    conservativeTarget: snapshot.suggestedTarget,
+    aggressiveTarget: 244,
+    riskReward: snapshot.riskReward,
+    positionSizeShares: snapshot.positionSizeShares,
+    positionNotional: snapshot.positionNotional,
+    maxRiskDollars: snapshot.riskDollars,
+    invalidationCondition: "Close below 198 invalidates the setup.",
+    timeHorizon: "Swing trade: several days to a few weeks, reviewed daily.",
+    keyReasons: ["Trend component: 90/100."],
+    keyRisks: ["This is paper-trading research, not financial advice."],
+    warnings: [],
+    ranking: {
+      symbol: snapshot.symbol,
+      rawScore: 82,
+      adjustedScore: 88,
+      rank: 1,
+      action: "buy",
+      bias: "bullish",
+      reasons: ["Trend component: 90/100."],
+      warnings: [],
+      suggestedStop: snapshot.suggestedStop,
+      suggestedTarget: snapshot.suggestedTarget,
+      riskReward: snapshot.riskReward,
+      components: {
+        trendScore: 90,
+        momentumScore: 85,
+        riskRewardScore: 78,
+        volumeScore: 72,
+        volatilityScore: 82,
+        rsiQualityScore: 88,
+        marketRegimeAdjustment: 6
+      }
+    }
   };
 }
 

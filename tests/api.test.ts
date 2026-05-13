@@ -2,6 +2,7 @@
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../server/app";
+import type { SignalSnapshot } from "../src/shared/types";
 
 describe("API safety behavior", () => {
   afterEach(() => {
@@ -309,6 +310,26 @@ describe("API safety behavior", () => {
     expect(response.body.riskAdjustmentMultiplier).toBe(1);
   });
 
+  it("builds a deterministic trade plan without requiring AI", async () => {
+    const app = createApp({
+      alpacaKeyId: undefined,
+      alpacaSecretKey: undefined,
+      databaseUrl: undefined,
+      dataFilePath: `data/test-quant-plan-${Date.now()}.json`
+    });
+
+    const response = await request(app)
+      .post("/api/trade-plan/deterministic")
+      .send({ snapshot: makeSignalSnapshot() })
+      .expect(200);
+
+    expect(response.body.symbol).toBe("AAPL");
+    expect(response.body.action).toBe("paper_long_candidate");
+    expect(response.body.ranking.action).toBe("buy");
+    expect(response.body.marketRegime).toBeNull();
+    expect(response.body.keyRisks.join(" ")).toMatch(/paper-trading research/i);
+  });
+
   it("runs a backtest from historical bars", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       const target = String(url);
@@ -465,4 +486,39 @@ function makeBars(count = 260) {
       v: 1000000 + index * 1000
     };
   });
+}
+
+function makeSignalSnapshot(): SignalSnapshot {
+  return {
+    symbol: "AAPL",
+    asOf: "2026-05-13T14:00:00.000Z",
+    lastPrice: 150,
+    previousClose: 148,
+    sma20: 142,
+    sma50: 135,
+    sma200: 120,
+    rsi14: 58,
+    atr14: 4,
+    volumeRatio: 1.25,
+    recentHigh: 152,
+    recentLow: 140,
+    suggestedStop: 140,
+    suggestedTarget: 174,
+    riskReward: 2.4,
+    trend: "uptrend",
+    bias: "bullish",
+    score: 84,
+    positionSizeShares: 100,
+    positionNotional: 15000,
+    riskDollars: 1000,
+    notes: [],
+    bars: makeBars().map((bar) => ({
+      timestamp: bar.t,
+      open: bar.o,
+      high: bar.h,
+      low: bar.l,
+      close: bar.c,
+      volume: bar.v
+    }))
+  };
 }

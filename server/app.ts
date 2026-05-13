@@ -15,6 +15,7 @@ import { buildOpportunityScan, dateKey } from "./opportunities";
 import { enrichOptionIdeas } from "./options";
 import { buildPositionMonitorSnapshot } from "./positionMonitor";
 import { createStore, getStoreDescription } from "./storeFactory";
+import { buildDeterministicTradePlan } from "./tradePlan";
 import type { AppStore } from "./storage";
 import { normalizeSymbol, paperOrderSchema, validatePaperOrder, watchlistItemSchema } from "./validation";
 import type {
@@ -253,6 +254,20 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
   app.get("/api/context/:symbol", asyncHandler(async (request, response) => {
     const symbol = normalizeSymbol(request.params.symbol);
     response.json(await getContextForSymbol(store, tradeContext, symbol));
+  }));
+
+  app.post("/api/trade-plan/deterministic", asyncHandler(async (request, response) => {
+    const snapshot = request.body?.snapshot as SignalSnapshot | undefined;
+    if (!snapshot?.symbol || !Array.isArray(snapshot.bars)) {
+      response.status(400).json({ error: "A SignalSnapshot with recent bars is required." });
+      return;
+    }
+
+    const [riskSettings, marketRegime] = await Promise.all([
+      store.getRiskSettings(),
+      getMarketRegimeSnapshot(alpaca).catch(() => null)
+    ]);
+    response.json(buildDeterministicTradePlan({ snapshot, riskSettings, marketRegime }));
   }));
 
   app.post("/api/ai/trade-plan", asyncHandler(async (request, response) => {
@@ -708,6 +723,14 @@ async function getMarketSnapshots(alpaca: AlpacaClient, store: AppStore): Promis
     }
   }
   return snapshots;
+}
+
+async function getMarketRegimeSnapshot(alpaca: AlpacaClient) {
+  const [spyBars, qqqBars] = await Promise.all([
+    alpaca.getBars("SPY"),
+    alpaca.getBars("QQQ")
+  ]);
+  return buildMarketRegimeSnapshot({ spyBars, qqqBars });
 }
 
 function getRiskProfile(accountEquity: number, settings: RiskSettings) {

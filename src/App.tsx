@@ -26,6 +26,7 @@ import type {
   AnalysisRun,
   BacktestResult,
   BrokerAccountSnapshot,
+  DeterministicTradePlan,
   EnrichedTradePlanResponse,
   HealthStatus,
   JournalAnalytics,
@@ -111,6 +112,7 @@ export function App() {
   const [activeSignal, setActiveSignal] = useState<SignalSnapshot | null>(null);
   const [analysisRuns, setAnalysisRuns] = useState<Record<string, AnalysisRun>>({});
   const [tradePlans, setTradePlans] = useState<Record<string, SavedTradePlan>>({});
+  const [quantPlans, setQuantPlans] = useState<Record<string, DeterministicTradePlan>>({});
   const [journal, setJournal] = useState<TradeJournalEntry[]>([]);
   const [journalAnalytics, setJournalAnalytics] = useState<JournalAnalytics | null>(null);
   const [opportunityScan, setOpportunityScan] = useState<OpportunityScan | null>(null);
@@ -162,6 +164,7 @@ export function App() {
     void loadContext(activeSignal.symbol);
     void loadOptions(activeSignal.symbol);
     void loadAnalysisHistory(activeSignal.symbol);
+    void loadQuantPlan(activeSignal);
   }, [activeSignal]);
 
   const sortedSnapshots = useMemo(() => {
@@ -169,6 +172,7 @@ export function App() {
   }, [snapshots]);
   const activePlanRecord = activeSignal ? tradePlans[activeSignal.symbol] : undefined;
   const activeTradePlan = activePlanRecord?.plan ?? null;
+  const activeQuantPlan = activeSignal ? quantPlans[activeSignal.symbol] ?? null : null;
   const activeAnalysis = activeSignal ? analysisRuns[activeSignal.symbol] : null;
   const activeContext = activeSignal ? contextsBySymbol[activeSignal.symbol] ?? activeAnalysis?.context ?? activePlanRecord?.context ?? null : null;
   const activeOptions = activeSignal ? optionsBySymbol[activeSignal.symbol] ?? [] : [];
@@ -442,6 +446,22 @@ export function App() {
       }
     } catch {
       // Analysis runs are an enhancement; missing history should not block symbol review.
+    }
+  }
+
+  async function loadQuantPlan(snapshot: SignalSnapshot) {
+    try {
+      const plan = await api<DeterministicTradePlan>("/api/trade-plan/deterministic", {
+        method: "POST",
+        body: JSON.stringify({ snapshot })
+      });
+      setQuantPlans((current) => ({ ...current, [snapshot.symbol]: plan }));
+    } catch {
+      setQuantPlans((current) => {
+        const next = { ...current };
+        delete next[snapshot.symbol];
+        return next;
+      });
     }
   }
 
@@ -790,6 +810,7 @@ export function App() {
       {activeSignal ? (
         <>
           <BeginnerGuidance signal={activeSignal} plan={activeTradePlan} />
+          <QuantPlanCard plan={activeQuantPlan} signal={activeSignal} />
           <Sparkline bars={activeSignal.bars} />
           <MetricStrip signal={activeSignal} />
           <div className="notes">
@@ -2036,6 +2057,75 @@ function BeginnerGuidance({ signal, plan }: { signal: SignalSnapshot; plan: Trad
   );
 }
 
+function QuantPlanCard({ plan, signal }: { plan: DeterministicTradePlan | null; signal: SignalSnapshot }) {
+  if (!plan) {
+    return (
+      <section className="quantPlan loading" aria-label="Quantitative trade plan">
+        <div className="quantPlanHeader">
+          <Target size={18} />
+          <div>
+            <span>Quant plan</span>
+            <strong>{signal.symbol}</strong>
+          </div>
+        </div>
+        <p>Building deterministic entry, stop, target, sizing, and risk checks from the latest signal.</p>
+      </section>
+    );
+  }
+
+  const regime = plan.marketRegime ? `${formatRegimeLabel(plan.marketRegime.regime)} (${plan.marketRegime.score})` : "Unavailable";
+
+  return (
+    <section className={`quantPlan ${plan.action === "avoid" ? "danger" : plan.action === "watch" ? "warn" : "good"}`} aria-label="Quantitative trade plan">
+      <div className="quantPlanHeader">
+        <Target size={18} />
+        <div>
+          <span>Quant plan</span>
+          <strong>{formatAction(plan.action)}</strong>
+        </div>
+        <small>{regime}</small>
+      </div>
+      <div className="quantPlanGrid">
+        <div>
+          <span>Entry zone</span>
+          <strong>{formatPriceZone(plan.entryZone)}</strong>
+        </div>
+        <div>
+          <span>Stop</span>
+          <strong>{formatCurrency(plan.stopLoss)}</strong>
+        </div>
+        <div>
+          <span>Target</span>
+          <strong>{formatCurrency(plan.conservativeTarget)} / {formatCurrency(plan.aggressiveTarget)}</strong>
+        </div>
+        <div>
+          <span>Risk/reward</span>
+          <strong>{plan.riskReward ? `${plan.riskReward}:1` : "--"}</strong>
+        </div>
+        <div>
+          <span>Size</span>
+          <strong>{plan.positionSizeShares ?? "--"} sh</strong>
+        </div>
+        <div>
+          <span>Max risk</span>
+          <strong>{formatCurrency(plan.maxRiskDollars)}</strong>
+        </div>
+      </div>
+      <p className="quantInvalidation">{plan.invalidationCondition}</p>
+      <div className="quantPlanLists">
+        <div>
+          <span>Reasons</span>
+          {plan.keyReasons.slice(0, 3).map((reason) => <p key={reason}>{reason}</p>)}
+        </div>
+        <div>
+          <span>Risks</span>
+          {[...plan.keyRisks, ...plan.warnings].slice(0, 3).map((risk) => <p key={risk}>{risk}</p>)}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function Sparkline({ bars }: { bars: SignalSnapshot["bars"] }) {
   const points = bars.slice(-80);
   if (points.length < 2) return <div className="sparkline emptyChart" />;
@@ -2710,6 +2800,12 @@ function formatCurrency(value?: number | null): string {
     currency: "USD",
     maximumFractionDigits: value > 100 ? 0 : 2
   }).format(value);
+}
+
+function formatPriceZone(zone: { low: number | null; high: number | null }): string {
+  if (zone.low === null || zone.high === null) return "--";
+  if (zone.low === zone.high) return formatCurrency(zone.low);
+  return `${formatCurrency(zone.low)} - ${formatCurrency(zone.high)}`;
 }
 
 function formatPct(value: number): string {
