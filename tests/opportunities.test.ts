@@ -11,6 +11,8 @@ describe("opportunity scoring", () => {
 
     expect(bullish.category).toMatch(/bullish/);
     expect(bullish.opportunityScore).toBeGreaterThan(watch.opportunityScore);
+    expect(bullish.ranking.components.trendScore).toBeGreaterThan(80);
+    expect(bullish.ranking.action).toBe("buy");
     expect(watch.warnings.join(" ")).toMatch(/Risk\/reward/);
   });
 

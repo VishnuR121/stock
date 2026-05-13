@@ -700,6 +700,22 @@ h3 {
   white-space: nowrap;
 }
 
+.rankingBreakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rankingBreakdown span {
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--surface-2) 72%, transparent);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
 .candidateActions {
   justify-content: flex-start;
 }

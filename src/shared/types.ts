@@ -37,6 +37,7 @@ export type OpportunityCategory =
   | "bearish_options"
   | "neutral_income"
   | "watch_only";
+export type RankingAction = "buy" | "watch" | "avoid" | "hold";
 
 export interface WatchlistItem {
   symbol: string;
@@ -102,6 +103,31 @@ export interface MarketRegimeSnapshot {
   warnings: string[];
   generatedAt: string;
   components: MarketRegimeComponent[];
+}
+
+export interface RankingComponents {
+  trendScore: number;
+  momentumScore: number;
+  riskRewardScore: number;
+  volumeScore: number;
+  volatilityScore: number;
+  rsiQualityScore: number;
+  marketRegimeAdjustment: number;
+}
+
+export interface RankedSetup {
+  symbol: string;
+  rawScore: number;
+  adjustedScore: number;
+  rank: number;
+  action: RankingAction;
+  bias: SignalBias;
+  reasons: string[];
+  warnings: string[];
+  suggestedStop: number | null;
+  suggestedTarget: number | null;
+  riskReward: number | null;
+  components: RankingComponents;
 }
 
 export interface RiskProfile {
@@ -403,6 +429,7 @@ export interface OpportunityCandidate {
   bias: SignalBias;
   reason: string;
   warnings: string[];
+  ranking: RankedSetup;
   snapshot: SignalSnapshot;
 }
 

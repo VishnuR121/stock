@@ -1,5 +1,6 @@
 import type {
   Bar,
+  MarketRegimeSnapshot,
   OpportunityCandidate,
   OpportunityCategory,
   OpportunityScan,
@@ -8,6 +9,7 @@ import type {
   SignalSnapshot
 } from "../src/shared/types";
 import { buildSignalSnapshot, round } from "./indicators";
+import { rankSignalSnapshot } from "./ranking";
 
 export const DEFAULT_OPPORTUNITY_UNIVERSE = [
   "SPY", "QQQ", "IWM", "DIA", "XLK", "XLF", "XLE", "XLV", "XLY", "XLP", "XLI", "XLU",
@@ -24,6 +26,7 @@ interface BuildOpportunityScanInput {
   universe?: string[];
   limit?: number;
   now?: Date;
+  marketRegime?: MarketRegimeSnapshot | null;
 }
 
 export async function buildOpportunityScan(input: BuildOpportunityScanInput): Promise<OpportunityScan> {
@@ -37,7 +40,7 @@ export async function buildOpportunityScan(input: BuildOpportunityScanInput): Pr
     try {
       const bars = await input.getBars(symbol);
       const snapshot = buildSignalSnapshot(symbol, bars, input.riskProfile);
-      candidates.push(scoreOpportunityCandidate(snapshot, input.riskSettings, now));
+      candidates.push(scoreOpportunityCandidate(snapshot, input.riskSettings, now, input.marketRegime));
     } catch (error) {
       skipped.push({
         symbol,
@@ -67,8 +70,10 @@ export async function buildOpportunityScan(input: BuildOpportunityScanInput): Pr
 export function scoreOpportunityCandidate(
   snapshot: SignalSnapshot,
   riskSettings: Pick<RiskSettings, "minRiskReward" | "maxDataAgeMinutes">,
-  now = new Date()
+  now = new Date(),
+  marketRegime?: MarketRegimeSnapshot | null
 ): OpportunityCandidate {
+  const ranking = rankSignalSnapshot({ snapshot, riskSettings, marketRegime, now });
   const category = getOpportunityCategory(snapshot);
   const direction = getDirection(category);
   const atrPct = snapshot.lastPrice && snapshot.atr14 ? round(snapshot.atr14 / snapshot.lastPrice, 4) : null;
@@ -86,9 +91,9 @@ export function scoreOpportunityCandidate(
   const volatilityBonus = getVolatilityBonus(atrPct, category);
   const penalties = getOpportunityPenalties(snapshot, riskSettings, now);
   const penaltyTotal = penalties.reduce((sum, item) => sum + item.value, 0);
-  const opportunityScore = clampScore(directionalBase + rrBonus + upsideBonus + volumeBonus + trendBonus + volatilityBonus - penaltyTotal);
+  const opportunityScore = clampScore((directionalBase + ranking.adjustedScore) / 2 + rrBonus + upsideBonus + volumeBonus + trendBonus + volatilityBonus - penaltyTotal);
   const riskAdjustedScore = clampScore(
-    directionalBase +
+    ranking.adjustedScore +
       rrBonus +
       Math.min(8, Math.max(-6, (snapshot.volumeRatio ?? 1) * 4 - 4)) -
       penaltyTotal -
@@ -111,7 +116,8 @@ export function scoreOpportunityCandidate(
     trend: snapshot.trend,
     bias: snapshot.bias,
     reason: buildOpportunityReason(snapshot, category, riskReward, upsidePct),
-    warnings: buildOpportunityWarnings(snapshot, riskSettings, now),
+    warnings: [...new Set([...buildOpportunityWarnings(snapshot, riskSettings, now), ...ranking.warnings])],
+    ranking,
     snapshot
   };
 }

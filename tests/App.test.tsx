@@ -121,6 +121,8 @@ describe("dashboard", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Find opportunities$/i }));
 
     expect(await screen.findByText("TSLA")).toBeInTheDocument();
+    expect(screen.getByText("Buy setup")).toBeInTheDocument();
+    expect(screen.getByText("Trend 90")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Analyze/i }));
     expect(await screen.findByText("TSLA loaded for analysis.")).toBeInTheDocument();
 
@@ -198,6 +200,28 @@ function makeOpportunityScan(): OpportunityScan {
         bias: "bullish",
         reason: "Bullish trend setup with 2:1 risk/reward and 8% target room.",
         warnings: [],
+        ranking: {
+          symbol: "TSLA",
+          rawScore: 82,
+          adjustedScore: 88,
+          rank: 1,
+          action: "buy",
+          bias: "bullish",
+          reasons: ["Trend component: 90/100."],
+          warnings: [],
+          suggestedStop: 198,
+          suggestedTarget: 234,
+          riskReward: 2,
+          components: {
+            trendScore: 90,
+            momentumScore: 85,
+            riskRewardScore: 78,
+            volumeScore: 72,
+            volatilityScore: 82,
+            rsiQualityScore: 88,
+            marketRegimeAdjustment: 6
+          }
+        },
         snapshot
       }
     ]

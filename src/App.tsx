@@ -1415,10 +1415,21 @@ function OpportunityFinderPanel({
                   <div className="opportunityStats">
                     <span>Opp {candidate.opportunityScore}</span>
                     <span>Risk adj {candidate.riskAdjustedScore}</span>
+                    {candidate.ranking && <span>{formatRankingAction(candidate.ranking.action)}</span>}
+                    {candidate.ranking && <span>Model {candidate.ranking.adjustedScore}</span>}
                     <span>{formatCurrency(candidate.lastPrice)}</span>
                     <span>{candidate.riskReward ? `${candidate.riskReward}:1` : "-- R/R"}</span>
                     <span>{candidate.upsidePct ? `${formatPct(candidate.upsidePct)} room` : "-- room"}</span>
                   </div>
+                  {candidate.ranking && (
+                    <div className="rankingBreakdown" aria-label={`${candidate.symbol} ranking breakdown`}>
+                      <span>Trend {candidate.ranking.components.trendScore}</span>
+                      <span>Momentum {candidate.ranking.components.momentumScore}</span>
+                      <span>R/R {candidate.ranking.components.riskRewardScore}</span>
+                      <span>Volume {candidate.ranking.components.volumeScore}</span>
+                      <span>RSI {candidate.ranking.components.rsiQualityScore}</span>
+                    </div>
+                  )}
                   {candidate.warnings[0] && <small>{candidate.warnings[0]}</small>}
                   <div className="candidateActions">
                     <button className="textButton" onClick={() => onAnalyze(candidate)} disabled={Boolean(busy)}>
@@ -2471,6 +2482,16 @@ function formatOpportunityCategory(category: OpportunityCandidate["category"]): 
     watch_only: "Watch only"
   };
   return labels[category];
+}
+
+function formatRankingAction(action: NonNullable<OpportunityCandidate["ranking"]>["action"]): string {
+  const labels: Record<NonNullable<OpportunityCandidate["ranking"]>["action"], string> = {
+    buy: "Buy setup",
+    watch: "Watch",
+    avoid: "Avoid",
+    hold: "Hold"
+  };
+  return labels[action];
 }
 
 function getErrorMessage(error: unknown): string {
