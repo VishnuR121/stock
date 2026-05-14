@@ -48,6 +48,53 @@ describe("backtest engine", () => {
     expect(result.trades.some((trade) => trade.symbol === "GOOD")).toBe(true);
     expect(result.trades.some((trade) => trade.symbol === "LEAK")).toBe(false);
   });
+
+  it("applies market regime entry filters without using future SPY or QQQ bars", () => {
+    const bars = makeEntryFriendlyBars("2025-01-01", 330);
+    const regimeBars = makeFallingThenFutureRecoveryBars("2025-01-01", 330);
+    const request = makeRequest({
+      symbols: ["AAPL"],
+      startDate: dateAt(bars, 240),
+      endDate: dateAt(bars, 270),
+      minScore: 65,
+      marketRegimeFilter: ["bullish"]
+    });
+
+    const result = runBacktest({
+      request,
+      barsBySymbol: { AAPL: bars },
+      benchmarkBars: regimeBars,
+      qqqBars: regimeBars,
+      riskSettings: getDefaultRiskSettings(),
+      now: new Date("2026-05-13T14:00:00.000Z")
+    });
+
+    expect(result.numberOfTrades).toBe(0);
+    expect(result.warnings.join(" ")).not.toMatch(/not applied/i);
+  });
+
+  it("exits open positions when the historical market regime turns bearish", () => {
+    const bars = makeFlatHoldingBars("2025-01-01", 330);
+    const regimeBars = makeBullThenBearishRegimeBars("2025-01-01", 330);
+    const request = makeRequest({
+      symbols: ["AAPL"],
+      startDate: dateAt(bars, 240),
+      endDate: dateAt(bars, 275),
+      holdingPeriodDays: 60,
+      minScore: 65
+    });
+
+    const result = runBacktest({
+      request,
+      barsBySymbol: { AAPL: bars },
+      benchmarkBars: regimeBars,
+      qqqBars: regimeBars,
+      riskSettings: getDefaultRiskSettings(),
+      now: new Date("2026-05-13T14:00:00.000Z")
+    });
+
+    expect(result.trades.some((trade) => trade.exitReason === "market_regime")).toBe(true);
+  });
 });
 
 function makeRequest(patch: Partial<BacktestRequest>): BacktestRequest {
@@ -111,6 +158,58 @@ function makeFlatThenFutureSpikeBars(startDate: string, count: number): Bar[] {
       low: close - 0.5,
       close,
       volume: 1000000
+    };
+  });
+}
+
+function makeFallingThenFutureRecoveryBars(startDate: string, count: number): Bar[] {
+  const start = new Date(`${startDate}T00:00:00.000Z`);
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    const close = index > 290 ? 85 + (index - 290) * 8 : 240 - index * 0.45;
+    return {
+      timestamp: date.toISOString(),
+      open: close + 0.2,
+      high: close + 1,
+      low: close - 1,
+      close,
+      volume: 1000000 + index * 1000
+    };
+  });
+}
+
+function makeBullThenBearishRegimeBars(startDate: string, count: number): Bar[] {
+  const start = new Date(`${startDate}T00:00:00.000Z`);
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    const close = index <= 245 ? 100 + index * 0.7 : 271.5 - (index - 245) * 6;
+    return {
+      timestamp: date.toISOString(),
+      open: close + 0.2,
+      high: close + 1.4,
+      low: close - 1.4,
+      close,
+      volume: 1000000 + index * 1000
+    };
+  });
+}
+
+function makeFlatHoldingBars(startDate: string, count: number): Bar[] {
+  const start = new Date(`${startDate}T00:00:00.000Z`);
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    const trendClose = 100 + Math.min(index, 240) * 0.45;
+    const close = index <= 240 ? trendClose : trendClose + (index % 2 === 0 ? 0.2 : -0.2);
+    return {
+      timestamp: date.toISOString(),
+      open: close - 0.1,
+      high: close + 0.6,
+      low: close - 0.6,
+      close,
+      volume: 1000000 + index * 1000
     };
   });
 }

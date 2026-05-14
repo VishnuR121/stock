@@ -5,16 +5,20 @@ import type {
   BacktestResult,
   BacktestTrade,
   Bar,
+  MarketRegimeLabel,
+  MarketRegimeSnapshot,
   RiskProfile,
   RiskSettings
 } from "../src/shared/types";
 import { buildSignalSnapshot, getDefaultRiskProfile, round } from "./indicators";
+import { buildMarketRegimeSnapshot } from "./marketRegime";
 import { rankSignalSnapshot } from "./ranking";
 
 interface RunBacktestInput {
   request: BacktestRequest;
   barsBySymbol: Record<string, Bar[]>;
   benchmarkBars: Bar[];
+  qqqBars?: Bar[];
   riskSettings: Pick<RiskSettings, "maxRiskPerTradePct" | "maxPositionPct" | "minRiskReward" | "maxDataAgeMinutes">;
   now?: Date;
 }
@@ -43,20 +47,25 @@ export function runBacktest(input: RunBacktestInput): BacktestResult {
   const trades: BacktestTrade[] = [];
   const equityCurve: BacktestEquityPoint[] = [];
   const openPositions: OpenBacktestPosition[] = [];
+  const qqqBars = input.qqqBars ?? input.barsBySymbol.QQQ ?? input.benchmarkBars;
+  const regimeCache = new Map<string, MarketRegimeSnapshot | null>();
   let realizedPnl = 0;
   let highWaterMark = initialEquity;
 
   if (!calendar.length) warnings.push("No benchmark bars were available inside the requested backtest window.");
-  if (request.marketRegimeFilter?.length) warnings.push("Historical market regime filters are accepted but not applied in Backtest v1.");
+  if (request.marketRegimeFilter?.length && qqqBars === input.benchmarkBars) {
+    warnings.push("QQQ historical bars were unavailable; SPY bars were reused for QQQ regime confirmation.");
+  }
 
   for (const date of calendar) {
+    const regime = getHistoricalMarketRegime(input.benchmarkBars, qqqBars, date, regimeCache);
     for (let index = openPositions.length - 1; index >= 0; index -= 1) {
       const position = openPositions[index];
       const bars = input.barsBySymbol[position.symbol] ?? [];
       const barIndex = findBarIndexOnOrBefore(bars, date);
       if (barIndex < position.entryIndex || barIndex === -1) continue;
       const bar = bars[barIndex];
-      const exit = getExit(position, bars, barIndex, request, riskProfile, input.riskSettings);
+      const exit = getExit(position, bars, barIndex, request, riskProfile, input.riskSettings, regime);
       if (!exit) continue;
 
       const trade = closePosition(position, exit.price, exit.date, exit.reason);
@@ -77,6 +86,7 @@ export function runBacktest(input: RunBacktestInput): BacktestResult {
 
     const slots = request.maxPositions - openPositions.length;
     if (slots <= 0) continue;
+    if (!isRegimeAllowedForEntry(regime, request.marketRegimeFilter)) continue;
 
     const candidates = symbols
       .filter((symbol) => !openPositions.some((position) => position.symbol === symbol))
@@ -177,13 +187,15 @@ function getExit(
   barIndex: number,
   request: BacktestRequest,
   riskProfile: RiskProfile,
-  riskSettings: Pick<RiskSettings, "minRiskReward" | "maxDataAgeMinutes">
+  riskSettings: Pick<RiskSettings, "minRiskReward" | "maxDataAgeMinutes">,
+  marketRegime: MarketRegimeSnapshot | null
 ): { price: number; date: string; reason: BacktestExitReason } | null {
   const bar = bars[barIndex];
   const date = toDateKey(bar.timestamp);
   if (bar.low <= position.stopLossPrice) return { price: position.stopLossPrice, date, reason: "stop" };
   if (bar.high >= position.targetPrice) return { price: position.targetPrice, date, reason: "target" };
   if (barIndex - position.entryIndex + 1 >= request.holdingPeriodDays) return { price: bar.close, date, reason: "holding_period" };
+  if (marketRegime?.regime === "bearish") return { price: bar.close, date, reason: "market_regime" };
 
   const history = bars.slice(0, barIndex + 1);
   if (history.length >= MIN_HISTORY_BARS) {
@@ -197,6 +209,38 @@ function getExit(
   }
 
   return null;
+}
+
+function isRegimeAllowedForEntry(
+  marketRegime: MarketRegimeSnapshot | null,
+  filter?: MarketRegimeLabel[]
+): boolean {
+  if (!filter?.length) return true;
+  if (!marketRegime) return false;
+  return filter.includes(marketRegime.regime);
+}
+
+function getHistoricalMarketRegime(
+  spyBars: Bar[],
+  qqqBars: Bar[],
+  date: string,
+  cache: Map<string, MarketRegimeSnapshot | null>
+): MarketRegimeSnapshot | null {
+  if (cache.has(date)) return cache.get(date) ?? null;
+  const spyIndex = findBarIndexOnOrBefore(spyBars, date);
+  const qqqIndex = findBarIndexOnOrBefore(qqqBars, date);
+  if (spyIndex < MIN_HISTORY_BARS || qqqIndex < MIN_HISTORY_BARS) {
+    cache.set(date, null);
+    return null;
+  }
+
+  const snapshot = buildMarketRegimeSnapshot({
+    spyBars: spyBars.slice(0, spyIndex + 1),
+    qqqBars: qqqBars.slice(0, qqqIndex + 1),
+    now: new Date(`${date}T21:00:00.000Z`)
+  });
+  cache.set(date, snapshot);
+  return snapshot;
 }
 
 function closePosition(position: OpenBacktestPosition, exitPrice: number, exitDate: string, exitReason: BacktestExitReason): BacktestTrade {

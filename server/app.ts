@@ -197,7 +197,7 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
 
     const [account, riskSettings] = await Promise.all([safeAccount(alpaca), store.getRiskSettings()]);
     const fetchOptions = getBacktestBarsOptions(backtestRequest);
-    const uniqueSymbols = [...new Set([...backtestRequest.symbols, "SPY"])];
+    const uniqueSymbols = [...new Set([...backtestRequest.symbols, "SPY", "QQQ"])];
     const entries = await Promise.all(
       uniqueSymbols.map(async (symbol) => [symbol, await alpaca.getBars(symbol, fetchOptions)] as const)
     );
@@ -209,6 +209,7 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       },
       barsBySymbol,
       benchmarkBars: barsBySymbol.SPY ?? [],
+      qqqBars: barsBySymbol.QQQ ?? [],
       riskSettings
     }));
   }));
