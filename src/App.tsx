@@ -71,7 +71,7 @@ type BeginnerAction = {
 };
 type ThemeMode = "light" | "dark";
 type AnalysisView = "decision" | "plan";
-type WorkspaceView = "overview" | "research" | "backtests" | "algo" | "positions" | "orders" | "account";
+type WorkspaceView = "overview" | "research" | "backtests" | "algo" | "positions" | "orders" | "journal" | "account";
 type AlgoQueueFilter = "active" | "selected" | "all" | "history";
 
 type BacktestForm = {
@@ -1243,6 +1243,11 @@ export function App() {
                   onSave={saveRiskSettings}
                 />
               </div>
+            </div>
+          )}
+
+          {workspaceView === "journal" && (
+            <div className="tabSurface journalSurface">
               {journalPanel}
             </div>
           )}
@@ -1325,6 +1330,7 @@ function WorkspaceTabs({
     { view: "algo", label: "Algo", icon: <Bot size={16} /> },
     { view: "positions", label: "Positions", icon: <LineChart size={16} /> },
     { view: "orders", label: "Orders", icon: <ClipboardCheck size={16} /> },
+    { view: "journal", label: "Journal", icon: <ClipboardCheck size={16} /> },
     { view: "account", label: "Account", icon: <Settings size={16} /> }
   ];
 

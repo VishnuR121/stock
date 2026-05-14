@@ -161,6 +161,7 @@ describe("dashboard", () => {
     expect(screen.getByRole("button", { name: /^Research$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Backtests$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Orders$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Journal$/i })).toBeInTheDocument();
     expect(screen.getByText("Today")).toBeInTheDocument();
     expect(await screen.findByText("Market regime")).toBeInTheDocument();
     expect(screen.getByText("Bullish")).toBeInTheDocument();
@@ -249,7 +250,7 @@ describe("dashboard", () => {
     fireEvent.click(screen.getByRole("button", { name: /Delete XLI breakout 0 Long stock proposal/i }));
     await waitFor(() => expect(screen.queryByText("XLI breakout 0")).not.toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: /^Account$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Journal$/i }));
     expect(await screen.findByText(/Delete me/)).toBeInTheDocument();
     expect(screen.getByText("Total paper")).toBeInTheDocument();
     expect(screen.getByText("Follow plan")).toBeInTheDocument();
