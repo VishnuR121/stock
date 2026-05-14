@@ -179,9 +179,17 @@ describe("dashboard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Run backtest$/i }));
 
-    expect(await screen.findByText("Backtest complete: 1 trades.")).toBeInTheDocument();
+    expect(await screen.findByText("Backtest complete: 13 trades.")).toBeInTheDocument();
     expect(screen.getByText("Total return")).toBeInTheDocument();
+    expect(screen.getByText("Near benchmark")).toBeInTheDocument();
+    expect(screen.getByText("Strategy was +1.15% versus SPY.")).toBeInTheDocument();
+    expect(screen.getByText("Vs SPY")).toBeInTheDocument();
+    expect(screen.getByText("+1.15%")).toBeInTheDocument();
+    expect(screen.getByText("Average win")).toBeInTheDocument();
+    expect(screen.getByText("Profit factor")).toBeInTheDocument();
     expect(screen.getByText("AAPL")).toBeInTheDocument();
+    expect(screen.getByText("BT12")).toBeInTheDocument();
+    expect(screen.getByText("13 total")).toBeInTheDocument();
     expect(screen.getByText("target")).toBeInTheDocument();
     expect(screen.getByText("Regime filter used SPY and QQQ history.")).toBeInTheDocument();
     expect(backtestPosts[0]).toContain('"marketRegimeFilter":["bullish"]');
@@ -459,6 +467,45 @@ function makeAlgoProposals(): AlgoTradeProposal[] {
 }
 
 function makeBacktestResult() {
+  const trades = [
+    {
+      id: "bt-aapl",
+      symbol: "AAPL",
+      side: "long",
+      entryDate: "2025-03-01",
+      exitDate: "2025-03-10",
+      entryPrice: 100,
+      exitPrice: 108.5,
+      quantity: 50,
+      stopLossPrice: 95,
+      targetPrice: 108.5,
+      entryScore: 82,
+      exitReason: "target",
+      pnl: 425,
+      pnlPct: 8.5,
+      rMultiple: 1.7,
+      riskDollars: 250
+    },
+    ...Array.from({ length: 12 }, (_, index) => ({
+      id: `bt-extra-${index + 1}`,
+      symbol: `BT${index + 1}`,
+      side: "long",
+      entryDate: "2025-04-01",
+      exitDate: "2025-04-08",
+      entryPrice: 100 + index,
+      exitPrice: 101 + index,
+      quantity: 10,
+      stopLossPrice: 95 + index,
+      targetPrice: 110 + index,
+      entryScore: 75,
+      exitReason: "holding_period",
+      pnl: 10,
+      pnlPct: 1,
+      rMultiple: 0.2,
+      riskDollars: 50
+    }))
+  ];
+
   return {
     generatedAt: "2026-05-13T14:00:00.000Z",
     request: {
@@ -476,7 +523,7 @@ function makeBacktestResult() {
     averageWin: 425,
     averageLoss: 0,
     maxDrawdownPct: -1.2,
-    numberOfTrades: 1,
+    numberOfTrades: trades.length,
     profitFactor: null,
     benchmarkReturnPct: 3.1,
     warnings: ["Regime filter used SPY and QQQ history."],
@@ -494,25 +541,6 @@ function makeBacktestResult() {
         drawdownPct: 0
       }
     ],
-    trades: [
-      {
-        id: "bt-aapl",
-        symbol: "AAPL",
-        side: "long",
-        entryDate: "2025-03-01",
-        exitDate: "2025-03-10",
-        entryPrice: 100,
-        exitPrice: 108.5,
-        quantity: 50,
-        stopLossPrice: 95,
-        targetPrice: 108.5,
-        entryScore: 82,
-        exitReason: "target",
-        pnl: 425,
-        pnlPct: 8.5,
-        rMultiple: 1.7,
-        riskDollars: 250
-      }
-    ]
+    trades
   };
 }

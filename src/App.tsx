@@ -1642,7 +1642,8 @@ function BacktestsPanel({
     });
   };
   const latestCurve = result?.equityCurve.slice(-8) ?? [];
-  const trades = result?.trades.slice(0, 12) ?? [];
+  const trades = result?.trades ?? [];
+  const interpretation = result ? getBacktestInterpretation(result) : null;
 
   return (
     <section className="panel backtestPanel" aria-label="Backtests">
@@ -1702,6 +1703,16 @@ function BacktestsPanel({
         <EmptyState text="Run a backtest to compare the strategy against SPY." />
       ) : (
         <>
+          {interpretation && (
+            <section className={`backtestInterpretation ${interpretation.tone}`} aria-label="Backtest interpretation">
+              <div>
+                <span>{interpretation.label}</span>
+                <strong>{interpretation.title}</strong>
+              </div>
+              <p>{interpretation.summary}</p>
+            </section>
+          )}
+
           <section className="backtestMetrics" aria-label="Backtest summary">
             <article>
               <span>Total return</span>
@@ -1726,6 +1737,22 @@ function BacktestsPanel({
             <article>
               <span>SPY benchmark</span>
               <strong>{result.benchmarkReturnPct === null ? "--" : formatPctPoints(result.benchmarkReturnPct)}</strong>
+            </article>
+            <article>
+              <span>Vs SPY</span>
+              <strong>{result.benchmarkReturnPct === null ? "--" : formatSignedPctPoints(result.totalReturnPct - result.benchmarkReturnPct)}</strong>
+            </article>
+            <article>
+              <span>Average win</span>
+              <strong>{formatCurrency(result.averageWin)}</strong>
+            </article>
+            <article>
+              <span>Average loss</span>
+              <strong>{formatCurrency(result.averageLoss)}</strong>
+            </article>
+            <article>
+              <span>Profit factor</span>
+              <strong>{result.profitFactor === null ? "--" : result.profitFactor}</strong>
             </article>
           </section>
 
@@ -3016,6 +3043,65 @@ function getBeginnerAction(signal: SignalSnapshot, plan?: TradePlan | null): Beg
   };
 }
 
+function getBacktestInterpretation(result: BacktestResult): {
+  label: string;
+  title: string;
+  summary: string;
+  tone: "good" | "warn" | "danger" | "neutral";
+} {
+  const benchmarkReturn = result.benchmarkReturnPct;
+  const vsBenchmark = benchmarkReturn === null ? null : result.totalReturnPct - benchmarkReturn;
+  const riskText = `Max drawdown was ${formatPctPoints(result.maxDrawdownPct)} across ${result.numberOfTrades} trades.`;
+  const expectancyText = result.profitFactor === null
+    ? `Average win was ${formatCurrency(result.averageWin)} and average loss was ${formatCurrency(result.averageLoss)}.`
+    : `Profit factor was ${result.profitFactor}; average win was ${formatCurrency(result.averageWin)} and average loss was ${formatCurrency(result.averageLoss)}.`;
+
+  if (!result.numberOfTrades) {
+    return {
+      label: "No sample",
+      title: "No trades passed these filters.",
+      summary: "Lower the score threshold, widen the regime filter, add symbols, or extend the date range before trusting this configuration.",
+      tone: "neutral"
+    };
+  }
+
+  if (vsBenchmark !== null && vsBenchmark < -5) {
+    return {
+      label: "Underperformed SPY",
+      title: `Strategy trailed SPY by ${formatPctPoints(Math.abs(vsBenchmark))}.`,
+      summary: `${riskText} ${expectancyText} Treat this as capital-preserving research unless a different parameter set improves benchmark-relative return.`,
+      tone: "warn"
+    };
+  }
+
+  if (vsBenchmark !== null && vsBenchmark > 2 && result.totalReturnPct > 0) {
+    return {
+      label: "Beat SPY",
+      title: `Strategy beat SPY by ${formatPctPoints(vsBenchmark)}.`,
+      summary: `${riskText} ${expectancyText} Compare this against nearby settings to make sure the edge is not a one-off parameter fit.`,
+      tone: "good"
+    };
+  }
+
+  if (result.totalReturnPct < 0) {
+    return {
+      label: "Negative result",
+      title: `Strategy lost ${formatPctPoints(Math.abs(result.totalReturnPct))}.`,
+      summary: `${riskText} ${expectancyText} This setting set should stay research-only unless later tests show a clear improvement.`,
+      tone: "danger"
+    };
+  }
+
+  return {
+    label: benchmarkReturn === null ? "Result" : "Near benchmark",
+    title: benchmarkReturn === null
+      ? `Strategy returned ${formatPctPoints(result.totalReturnPct)}.`
+      : `Strategy was ${formatSignedPctPoints(vsBenchmark ?? 0)} versus SPY.`,
+    summary: `${riskText} ${expectancyText} Review the trade list to see whether exits are mostly stops, score drops, or holding-period exits.`,
+    tone: "neutral"
+  };
+}
+
 function EmptyState({ text }: { text: string }) {
   return <div className="emptyState">{text}</div>;
 }
@@ -3110,6 +3196,11 @@ function formatPct(value: number): string {
 
 function formatPctPoints(value: number): string {
   return `${Math.round(value * 100) / 100}%`;
+}
+
+function formatSignedPctPoints(value: number): string {
+  const rounded = Math.round(value * 100) / 100;
+  return `${rounded > 0 ? "+" : ""}${rounded}%`;
 }
 
 function formatRegimeLabel(value: MarketRegimeSnapshot["regime"]): string {

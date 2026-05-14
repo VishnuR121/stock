@@ -486,8 +486,52 @@ h3 {
 
 .backtestMetrics {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
+}
+
+.backtestInterpretation {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.28fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.backtestInterpretation span {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.backtestInterpretation strong {
+  display: block;
+  margin-top: 4px;
+}
+
+.backtestInterpretation p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.backtestInterpretation.good {
+  border-color: var(--success-border);
+  background: var(--success-surface);
+}
+
+.backtestInterpretation.warn {
+  border-color: var(--warn-border);
+  background: var(--warn-surface);
+}
+
+.backtestInterpretation.danger {
+  border-color: var(--danger-border);
+  background: var(--danger-surface);
 }
 
 .backtestMetrics article {
@@ -2203,7 +2247,8 @@ th {
   .accountSurface,
   .overviewMetrics,
   .backtestForm,
-  .backtestMetrics {
+  .backtestMetrics,
+  .backtestInterpretation {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -2269,6 +2314,7 @@ th {
   .orderForm,
   .backtestForm,
   .backtestMetrics,
+  .backtestInterpretation,
   .journalAnalytics,
   .reviewList {
     grid-template-columns: 1fr;
