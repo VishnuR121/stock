@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { JsonStore } from "../server/storage";
+import { MemoryStore } from "../server/storage";
 import type { AlgoTradeProposal } from "../src/shared/types";
 
 describe("algo proposal queue persistence", () => {
   it("replaces duplicate active proposals while preserving placed history", async () => {
-    const store = new JsonStore(`data/test-algo-queue-${Date.now()}.json`);
+    const store = new MemoryStore();
     const first = makeProposal({ id: "first", status: "queued", score: 70 });
     const replacement = makeProposal({ id: "replacement", status: "queued", score: 85 });
     const placed = makeProposal({ id: "placed", status: "placed", score: 65 });
@@ -18,8 +18,8 @@ describe("algo proposal queue persistence", () => {
     expect(proposals[0].score).toBe(85);
   });
 
-  it("permanently deletes proposals and journal entries from JSON storage", async () => {
-    const store = new JsonStore(`data/test-delete-records-${Date.now()}.json`);
+  it("permanently deletes proposals and journal entries from app storage", async () => {
+    const store = new MemoryStore();
     const proposal = makeProposal({ id: "delete-me", status: "queued" });
     const journal = await store.addJournalEntry({
       symbol: "XLI",

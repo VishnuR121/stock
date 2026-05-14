@@ -1,6 +1,6 @@
 import { createDb } from "./db/client";
 import { DatabaseStore } from "./db/store";
-import { JsonStore, type AppStore } from "./storage";
+import { MemoryStore, type AppStore } from "./storage";
 import type { AppConfig } from "./config";
 
 export function createStore(config: AppConfig): AppStore {
@@ -8,9 +8,15 @@ export function createStore(config: AppConfig): AppStore {
     return new DatabaseStore(createDb(config.databaseUrl));
   }
 
-  return new JsonStore(config.dataFilePath);
+  if (process.env.NODE_ENV === "test") {
+    return new MemoryStore();
+  }
+
+  throw new Error("DATABASE_URL is required. Runtime JSON storage is disabled; configure Postgres/Supabase storage.");
 }
 
 export function getStoreDescription(config: AppConfig): string {
-  return config.databaseUrl ? "postgres" : config.dataFilePath;
+  if (config.databaseUrl) return "postgres";
+  if (process.env.NODE_ENV === "test") return "memory";
+  return "missing_database_url";
 }

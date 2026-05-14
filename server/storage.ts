@@ -339,6 +339,23 @@ export class JsonStore implements AppStore {
   }
 }
 
+export class MemoryStore extends JsonStore {
+  private data: StoredAppData;
+
+  constructor(seed: Partial<StoredAppData> = {}) {
+    super("__memory__");
+    this.data = normalizeData(seed);
+  }
+
+  async read(): Promise<StoredAppData> {
+    return cloneData(this.data);
+  }
+
+  async write(data: StoredAppData): Promise<void> {
+    this.data = cloneData(normalizeData(data));
+  }
+}
+
 export function normalizeData(raw: Partial<StoredAppData>): StoredAppData {
   return {
     watchlist: Array.isArray(raw.watchlist) ? raw.watchlist : createSeedWatchlist(),
@@ -355,6 +372,10 @@ export function normalizeData(raw: Partial<StoredAppData>): StoredAppData {
     opportunityScans: Array.isArray(raw.opportunityScans) ? raw.opportunityScans : [],
     scanHistory: Array.isArray(raw.scanHistory) ? raw.scanHistory : []
   };
+}
+
+function cloneData(data: StoredAppData): StoredAppData {
+  return JSON.parse(JSON.stringify(data)) as StoredAppData;
 }
 
 function getActiveProposalKey(proposal: AlgoTradeProposal): string {

@@ -1042,9 +1042,9 @@ export function App() {
             <StatusTile
               icon={<Settings size={20} />}
               label="Storage"
-              value={health?.databaseConfigured ? "Postgres" : "Local JSON"}
+              value={formatDataStore(health?.dataStore)}
               detail={health ? formatDataStore(health.dataStore) : undefined}
-              tone="neutral"
+              tone={health?.databaseConfigured ? "neutral" : "warn"}
             />
           </section>
         </section>
@@ -3311,8 +3311,11 @@ function formatProviderStatus(status: string): string {
   return status.replaceAll("_", " ");
 }
 
-function formatDataStore(value: string): string {
+function formatDataStore(value?: string): string {
+  if (!value) return "Checking";
   if (value === "postgres") return "Server database";
+  if (value === "memory") return "Test memory";
+  if (value === "missing_database_url") return "Database missing";
   const normalized = value.replaceAll("\\", "/");
   const parts = normalized.split("/");
   return parts.slice(-2).join("/");

@@ -10,6 +10,7 @@
     "build": "tsc --noEmit && vite build",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
+    "db:migrate:journal": "tsx scripts/apply-journal-metadata-migration.ts",
     "db:studio": "drizzle-kit studio",
     "db:import-json": "tsx scripts/import-json-to-db.ts",
     "preview": "vite preview --host 127.0.0.1 --port 4173",

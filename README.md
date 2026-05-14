@@ -18,7 +18,7 @@ This is an educational research and paper-trading tool. It is not financial advi
 - Alpaca paper-only bracket order flow with stop loss, take profit, event check, risk acceptance, paper-only confirmation, validation, and kill switch.
 - Paper trade journal, saved plans, analysis runs, position monitoring, and journal analytics.
 - Options research views for education and comparison only.
-- Local JSON storage by default, with optional Postgres/Supabase storage through Drizzle.
+- Postgres/Supabase storage through Drizzle. Runtime JSON storage is disabled.
 
 ## Safety Boundaries
 
@@ -65,7 +65,6 @@ This is an educational research and paper-trading tool. It is not financial advi
    ALPHA_VANTAGE_API_KEY=
    SEC_USER_AGENT=ResearchCopilot/0.1 your-email@example.com
    DATABASE_URL=
-   DATA_FILE_PATH=data/app-data.json
    TRADINGVIEW_WEBHOOK_SECRET=
    PORT=3001
    ```
@@ -76,7 +75,7 @@ This is an educational research and paper-trading tool. It is not financial advi
 
    `SEC_USER_AGENT` is used for free SEC EDGAR requests. Set it to identify your local app and contact email. If it is omitted, SEC filings and company facts are skipped instead of using a placeholder identity.
 
-   `DATABASE_URL` is optional. If it is empty, the app uses `data/app-data.json`. If it is set to a Postgres/Supabase URL, the Node server stores watchlists, scans, cached context, AI plans, Decision Center analyses, TradingView signals, settings, and journal entries in Postgres.
+   `DATABASE_URL` is required. The Node server stores watchlists, scans, cached context, AI plans, Decision Center analyses, TradingView signals, settings, and journal entries in Postgres/Supabase.
 
    `TRADINGVIEW_WEBHOOK_SECRET` is optional. Set it before using `/api/tradingview/webhook`.
 
@@ -92,7 +91,7 @@ This is an educational research and paper-trading tool. It is not financial advi
    http://127.0.0.1:5173
    ```
 
-## Optional Supabase/Postgres Storage
+## Supabase/Postgres Storage
 
 Keep the database private on the server. Do not put Supabase keys or database URLs in frontend code.
 
@@ -104,7 +103,13 @@ Keep the database private on the server. Do not put Supabase keys or database UR
    npm run db:push
    ```
 
-4. Import existing local JSON data if needed:
+   If `drizzle-kit push` fails while introspecting your database, apply the current journal metadata migration directly:
+
+   ```bash
+   npm run db:migrate:journal
+   ```
+
+4. Import existing local JSON data once if needed:
 
    ```bash
    npm run db:import-json
@@ -115,10 +120,11 @@ Useful database commands:
 ```bash
 npm run db:generate
 npm run db:push
+npm run db:migrate:journal
 npm run db:studio
 ```
 
-Journal source metadata, follow-plan flags, signal timestamps, and exit reasons are stored in both JSON and Postgres. Run `npm run db:push` or apply the included Drizzle migrations after pulling schema changes.
+Journal source metadata, follow-plan flags, signal timestamps, and exit reasons are stored in Postgres. The JSON import command is only for one-time migration from old local files.
 
 ## Backtesting Notes
 

@@ -1,6 +1,5 @@
 import cors from "cors";
 import express, { type Request, type Response } from "express";
-import path from "node:path";
 import { AlpacaClient } from "./alpaca";
 import { buildAlgoTradeProposals } from "./algo";
 import { buildAnalysisRun, buildFallbackManagerVerdict, buildSafetyBlockers, buildSpecialistReports } from "./analysis";
@@ -123,7 +122,7 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       secUserAgentConfigured: isConfiguredSecUserAgent(config.secUserAgent),
       tradingViewWebhookConfigured: Boolean(config.tradingViewWebhookSecret),
       databaseConfigured: Boolean(config.databaseUrl),
-      dataStore: getStoreDescription(config) === "postgres" ? "postgres" : path.resolve(config.dataFilePath)
+      dataStore: getStoreDescription(config)
     };
     response.json(status);
   }));

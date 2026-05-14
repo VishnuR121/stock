@@ -74,8 +74,8 @@ describe("dashboard", () => {
           alphaVantageConfigured: false,
           secUserAgentConfigured: false,
           tradingViewWebhookConfigured: false,
-          databaseConfigured: false,
-          dataStore: "data/app-data.json"
+          databaseConfigured: true,
+          dataStore: "postgres"
         });
       }
       if (target.endsWith("/api/settings/risk")) {
