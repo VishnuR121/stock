@@ -1,12 +1,14 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
-import type { AlgoTradeProposal, DeterministicTradePlan, OpportunityScan, SignalSnapshot } from "../src/shared/types";
+import type { AlgoTradeProposal, DeterministicTradePlan, OpportunityScan, RiskSettings, SignalSnapshot } from "../src/shared/types";
 
 describe("dashboard", () => {
   let watchlistPosts: string[];
   let backtestPosts: string[];
   let algoProposals: AlgoTradeProposal[];
+  let riskSettings: RiskSettings;
+  let riskSettingsPosts: RiskSettings[];
   let journalEntries: Array<{
     id: string;
     symbol: string;
@@ -21,6 +23,17 @@ describe("dashboard", () => {
     watchlistPosts = [];
     backtestPosts = [];
     algoProposals = makeAlgoProposals();
+    riskSettingsPosts = [];
+    riskSettings = {
+      maxRiskPerTradePct: 0.01,
+      maxPositionPct: 0.1,
+      maxDailyLossPct: 0.03,
+      minRiskReward: 1.5,
+      maxDataAgeMinutes: 4320,
+      priceCollarPct: 0.03,
+      earningsWindowDays: 7,
+      killSwitchEnabled: false
+    };
     journalEntries = [
       {
         id: "journal-delete-test",
@@ -39,8 +52,10 @@ describe("dashboard", () => {
           ok: true,
           alpacaConfigured: false,
           alpacaPaperOnly: true,
-          paperTradingBlockedReasons: ["Alpaca paper credentials are missing."],
-          killSwitchEnabled: false,
+          paperTradingBlockedReasons: riskSettings.killSwitchEnabled
+            ? ["Alpaca paper credentials are missing.", "Paper order kill switch is enabled."]
+            : ["Alpaca paper credentials are missing."],
+          killSwitchEnabled: riskSettings.killSwitchEnabled,
           aiProvider: "openai",
           aiConfigured: false,
           aiModel: "gpt-5.4-mini",
@@ -54,6 +69,13 @@ describe("dashboard", () => {
           databaseConfigured: false,
           dataStore: "data/app-data.json"
         });
+      }
+      if (target.endsWith("/api/settings/risk")) {
+        if (init?.method === "POST") {
+          riskSettings = { ...riskSettings, ...JSON.parse(String(init.body ?? "{}")) };
+          riskSettingsPosts.push(riskSettings);
+        }
+        return jsonResponse(riskSettings);
       }
       if (target.endsWith("/api/watchlist")) {
         if (init?.method === "POST") {
@@ -220,6 +242,26 @@ describe("dashboard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Delete SPY journal entry/i }));
     await waitFor(() => expect(screen.queryByText(/Delete me/)).not.toBeInTheDocument());
+  });
+
+  it("saves edited risk settings from the account workspace", async () => {
+    render(<App />);
+
+    await screen.findAllByText("SPY");
+    fireEvent.click(screen.getByRole("button", { name: /^Account$/i }));
+    expect(await screen.findByText("Risk settings")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Max risk per trade %"), { target: { value: "0.5" } });
+    fireEvent.change(screen.getByLabelText("Minimum R/R"), { target: { value: "2" } });
+    fireEvent.click(screen.getByLabelText("Kill switch enabled"));
+    const saveButton = screen.getByRole("button", { name: /^Save risk settings$/i });
+    await waitFor(() => expect(saveButton).not.toBeDisabled());
+    fireEvent.click(saveButton);
+
+    await waitFor(() => expect(riskSettingsPosts).toHaveLength(1));
+    expect(riskSettingsPosts[0].maxRiskPerTradePct).toBe(0.005);
+    expect(riskSettingsPosts[0].minRiskReward).toBe(2);
+    expect(riskSettingsPosts[0].killSwitchEnabled).toBe(true);
   });
 });
 

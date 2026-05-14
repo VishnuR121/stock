@@ -406,6 +406,12 @@ h3 {
   align-items: start;
 }
 
+.accountStack {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
 .backtestPanel {
   display: grid;
   gap: 14px;
@@ -1569,12 +1575,20 @@ select {
   gap: 10px;
 }
 
+.riskSettingsForm {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .orderForm label,
+.riskSettingsForm label,
 .checkboxStack {
   min-width: 0;
 }
 
-.orderForm label span {
+.orderForm label span,
+.riskSettingsForm label span {
   display: block;
   margin-bottom: 5px;
   color: var(--text-muted);
@@ -1584,8 +1598,24 @@ select {
 
 .checkboxStack,
 .orderForm .wideButton,
+.riskSettingsForm .wideButton,
 .orderPreview {
   grid-column: 1 / -1;
+}
+
+.riskSettingsForm .riskToggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.riskSettingsForm .riskToggle input {
+  width: 18px;
+  min-height: 18px;
+}
+
+.riskSettingsForm .riskToggle span {
+  margin-bottom: 0;
 }
 
 .checkboxStack {

@@ -189,11 +189,10 @@ export function App() {
     setBusy("refresh");
     setMessage(null);
     try {
-      const [healthData, watchlistData] = await Promise.all([
-        api<HealthStatus>("/api/health"),
+      const [, watchlistData] = await Promise.all([
+        loadHealth(),
         api<WatchlistItem[]>("/api/watchlist")
       ]);
-      setHealth(healthData);
       setWatchlist(watchlistData);
       await Promise.all([
         loadAccount(),
@@ -209,6 +208,14 @@ export function App() {
       setMessage(getErrorMessage(error));
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function loadHealth() {
+    try {
+      setHealth(await api<HealthStatus>("/api/health"));
+    } catch {
+      setHealth(null);
     }
   }
 
@@ -620,7 +627,26 @@ export function App() {
         body: JSON.stringify({ ...riskSettings, killSwitchEnabled: enabled })
       });
       setRiskSettings(saved);
+      await loadHealth();
       setMessage(enabled ? "Paper order kill switch enabled." : "Paper order kill switch disabled.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function saveRiskSettings(next: RiskSettings) {
+    setBusy("risk-settings");
+    setMessage(null);
+    try {
+      const saved = await api<RiskSettings>("/api/settings/risk", {
+        method: "POST",
+        body: JSON.stringify(next)
+      });
+      setRiskSettings(saved);
+      await loadHealth();
+      setMessage("Risk settings saved.");
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -1201,7 +1227,14 @@ export function App() {
 
           {workspaceView === "account" && (
             <div className="tabSurface accountSurface">
-              {accountPanel}
+              <div className="accountStack">
+                {accountPanel}
+                <RiskSettingsPanel
+                  riskSettings={riskSettings}
+                  busy={busy === "risk-settings"}
+                  onSave={saveRiskSettings}
+                />
+              </div>
               {journalPanel}
             </div>
           )}
@@ -2502,6 +2535,152 @@ function SafetyControls({
   );
 }
 
+function RiskSettingsPanel({
+  riskSettings,
+  busy,
+  onSave
+}: {
+  riskSettings: RiskSettings | null;
+  busy: boolean;
+  onSave: (next: RiskSettings) => void;
+}) {
+  const [draft, setDraft] = useState<RiskSettings | null>(riskSettings);
+
+  useEffect(() => {
+    setDraft(riskSettings);
+  }, [riskSettings]);
+
+  if (!draft) {
+    return (
+      <section className="panel compactPanel">
+        <EmptyState text="Risk settings unavailable" />
+      </section>
+    );
+  }
+
+  const update = (patch: Partial<RiskSettings>) => {
+    setDraft((current) => current ? { ...current, ...patch } : current);
+  };
+
+  const save = () => {
+    onSave({
+      ...draft,
+      maxRiskPerTradePct: clampFraction(draft.maxRiskPerTradePct, 0.0001, 0.1),
+      maxPositionPct: clampFraction(draft.maxPositionPct, 0.001, 1),
+      maxDailyLossPct: clampFraction(draft.maxDailyLossPct, 0.001, 1),
+      minRiskReward: Math.max(0.1, draft.minRiskReward),
+      maxDataAgeMinutes: Math.max(1, Math.round(draft.maxDataAgeMinutes)),
+      priceCollarPct: clampFraction(draft.priceCollarPct, 0.001, 0.5),
+      earningsWindowDays: Math.max(0, Math.round(draft.earningsWindowDays))
+    });
+  };
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    save();
+  };
+
+  return (
+    <section className="panel compactPanel">
+      <div className="panelTitle">
+        <ShieldCheck size={18} />
+        <div>
+          <h2>Risk settings</h2>
+          <p>These server-side controls gate paper order validation and trade planning.</p>
+        </div>
+      </div>
+      <form className="riskSettingsForm" onSubmit={submit}>
+        <label>
+          <span>Max risk per trade %</span>
+          <input
+            type="number"
+            min="0.01"
+            max="10"
+            step="0.05"
+            value={fractionToPercentInput(draft.maxRiskPerTradePct)}
+            onChange={(event) => updatePercent(update, "maxRiskPerTradePct", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Max position %</span>
+          <input
+            type="number"
+            min="0.1"
+            max="100"
+            step="0.5"
+            value={fractionToPercentInput(draft.maxPositionPct)}
+            onChange={(event) => updatePercent(update, "maxPositionPct", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Max daily loss %</span>
+          <input
+            type="number"
+            min="0.1"
+            max="100"
+            step="0.5"
+            value={fractionToPercentInput(draft.maxDailyLossPct)}
+            onChange={(event) => updatePercent(update, "maxDailyLossPct", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Minimum R/R</span>
+          <input
+            type="number"
+            min="0.1"
+            step="0.1"
+            value={draft.minRiskReward}
+            onChange={(event) => updateNumber(update, "minRiskReward", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Max data age minutes</span>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            value={draft.maxDataAgeMinutes}
+            onChange={(event) => updateNumber(update, "maxDataAgeMinutes", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Price collar %</span>
+          <input
+            type="number"
+            min="0.1"
+            max="50"
+            step="0.1"
+            value={fractionToPercentInput(draft.priceCollarPct)}
+            onChange={(event) => updatePercent(update, "priceCollarPct", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Earnings window days</span>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={draft.earningsWindowDays}
+            onChange={(event) => updateNumber(update, "earningsWindowDays", event.target.value)}
+          />
+        </label>
+        <label className="riskToggle">
+          <input
+            type="checkbox"
+            checked={draft.killSwitchEnabled}
+            onChange={(event) => update({ killSwitchEnabled: event.target.checked })}
+          />
+          <span>Kill switch enabled</span>
+        </label>
+        <button className="wideButton" type="button" onClick={save} disabled={busy}>
+          {busy ? <Loader2 className="spin" size={17} /> : <Save size={17} />}
+          <span>Save risk settings</span>
+        </button>
+      </form>
+    </section>
+  );
+}
+
 function TradePlanView({
   plan,
   signal,
@@ -2849,12 +3028,29 @@ function isFullSignal(signal: Pick<SignalSnapshot, "bars"> | unknown): signal is
   return Boolean(signal && typeof signal === "object" && "bars" in signal && Array.isArray((signal as SignalSnapshot).bars));
 }
 
-function updateNumber(
-  update: (patch: Partial<PaperOrderRequest>) => void,
-  key: keyof PaperOrderRequest,
+function updateNumber<T extends object>(
+  update: (patch: Partial<T>) => void,
+  key: keyof T,
   value: string
 ) {
-  update({ [key]: value === "" ? undefined : Number(value) } as Partial<PaperOrderRequest>);
+  update({ [key]: value === "" ? undefined : Number(value) } as Partial<T>);
+}
+
+function updatePercent<T extends object>(
+  update: (patch: Partial<T>) => void,
+  key: keyof T,
+  value: string
+) {
+  update({ [key]: value === "" ? 0 : Number(value) / 100 } as Partial<T>);
+}
+
+function fractionToPercentInput(value: number): number {
+  return Math.round(value * 10000) / 100;
+}
+
+function clampFraction(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
 }
 
 function orderMatchesActivePlan(order: PaperOrderRequest, signal: SignalSnapshot, quantPlan: DeterministicTradePlan | null): boolean {
