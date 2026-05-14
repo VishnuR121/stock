@@ -425,11 +425,57 @@ h3 {
 }
 
 .backtestForm span,
+.regimeFilter legend,
+.regimeFilter small,
 .backtestMetrics span {
   color: var(--text-muted);
   font-size: 0.76rem;
   font-weight: 850;
   text-transform: uppercase;
+}
+
+.regimeFilter {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.regimeFilter legend {
+  padding: 0 4px;
+}
+
+.regimeFilter label {
+  display: inline-flex;
+  grid-auto-flow: column;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.regimeFilter input {
+  margin: 0;
+}
+
+.regimeFilter label span {
+  color: var(--text);
+  font-size: 0.82rem;
+  text-transform: none;
+}
+
+.regimeFilter small {
+  margin-left: auto;
 }
 
 .backtestMetrics {

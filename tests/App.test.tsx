@@ -5,6 +5,7 @@ import type { AlgoTradeProposal, DeterministicTradePlan, OpportunityScan, Signal
 
 describe("dashboard", () => {
   let watchlistPosts: string[];
+  let backtestPosts: string[];
   let algoProposals: AlgoTradeProposal[];
   let journalEntries: Array<{
     id: string;
@@ -18,6 +19,7 @@ describe("dashboard", () => {
 
   beforeEach(() => {
     watchlistPosts = [];
+    backtestPosts = [];
     algoProposals = makeAlgoProposals();
     journalEntries = [
       {
@@ -72,6 +74,7 @@ describe("dashboard", () => {
         });
       }
       if (target.endsWith("/api/backtest")) {
+        backtestPosts.push(String(init?.body ?? ""));
         return jsonResponse(makeBacktestResult());
       }
       if (target.endsWith("/api/trade-plan/deterministic")) {
@@ -138,6 +141,7 @@ describe("dashboard", () => {
     await screen.findAllByText("SPY");
     fireEvent.click(screen.getByRole("button", { name: /^Backtests$/i }));
     expect(screen.getByText("Long-only swing test using historical bars. Signals use only past data and enter on the next bar.")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Bullish"));
 
     fireEvent.click(screen.getByRole("button", { name: /^Run backtest$/i }));
 
@@ -145,6 +149,8 @@ describe("dashboard", () => {
     expect(screen.getByText("Total return")).toBeInTheDocument();
     expect(screen.getByText("AAPL")).toBeInTheDocument();
     expect(screen.getByText("target")).toBeInTheDocument();
+    expect(screen.getByText("Regime filter used SPY and QQQ history.")).toBeInTheDocument();
+    expect(backtestPosts[0]).toContain('"marketRegimeFilter":["bullish"]');
   });
 
   it("loads an opportunity candidate and can add it to the watchlist", async () => {
@@ -379,7 +385,7 @@ function makeAlgoProposals(): AlgoTradeProposal[] {
     summary: "Test proposal",
     setup: [],
     riskNotes: [],
-    warnings: [],
+    warnings: ["Regime filter used SPY and QQQ history."],
     order: {
       symbol: "XLI",
       side: "buy",
@@ -417,7 +423,7 @@ function makeBacktestResult() {
     numberOfTrades: 1,
     profitFactor: null,
     benchmarkReturnPct: 3.1,
-    warnings: [],
+    warnings: ["Regime filter used SPY and QQQ history."],
     equityCurve: [
       {
         date: "2025-12-30",

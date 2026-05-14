@@ -30,6 +30,7 @@ import type {
   EnrichedTradePlanResponse,
   HealthStatus,
   JournalAnalytics,
+  MarketRegimeLabel,
   MarketRegimeSnapshot,
   OpportunityCandidate,
   OpportunityScan,
@@ -79,6 +80,7 @@ type BacktestForm = {
   holdingPeriodDays: number;
   maxPositions: number;
   minScore: number;
+  marketRegimeFilter: MarketRegimeLabel[];
 };
 
 const emptyOrder: PaperOrderRequest = {
@@ -101,7 +103,8 @@ const defaultBacktestForm: BacktestForm = {
   endDate: "2025-12-31",
   holdingPeriodDays: 10,
   maxPositions: 3,
-  minScore: 70
+  minScore: 70,
+  marketRegimeFilter: []
 };
 
 export function App() {
@@ -736,7 +739,8 @@ export function App() {
           endDate: backtestForm.endDate,
           holdingPeriodDays: backtestForm.holdingPeriodDays,
           maxPositions: backtestForm.maxPositions,
-          minScore: backtestForm.minScore
+          minScore: backtestForm.minScore,
+          marketRegimeFilter: backtestForm.marketRegimeFilter.length ? backtestForm.marketRegimeFilter : undefined
         })
       });
       setBacktestResult(result);
@@ -1564,6 +1568,17 @@ function BacktestsPanel({
   onRun: () => void;
 }) {
   const update = (patch: Partial<BacktestForm>) => onChange((current) => ({ ...current, ...patch }));
+  const toggleRegime = (regime: MarketRegimeLabel) => {
+    onChange((current) => {
+      const selected = current.marketRegimeFilter.includes(regime);
+      return {
+        ...current,
+        marketRegimeFilter: selected
+          ? current.marketRegimeFilter.filter((item) => item !== regime)
+          : [...current.marketRegimeFilter, regime]
+      };
+    });
+  };
   const latestCurve = result?.equityCurve.slice(-8) ?? [];
   const trades = result?.trades.slice(0, 12) ?? [];
 
@@ -1605,6 +1620,20 @@ function BacktestsPanel({
           <span>Min score</span>
           <input type="number" min="1" max="100" value={form.minScore} onChange={(event) => update({ minScore: Number(event.target.value) })} />
         </label>
+        <fieldset className="regimeFilter">
+          <legend>Allowed regimes</legend>
+          {(["bullish", "neutral", "caution", "bearish"] as MarketRegimeLabel[]).map((regime) => (
+            <label key={regime}>
+              <input
+                type="checkbox"
+                checked={form.marketRegimeFilter.includes(regime)}
+                onChange={() => toggleRegime(regime)}
+              />
+              <span>{formatRegimeLabel(regime)}</span>
+            </label>
+          ))}
+          <small>{form.marketRegimeFilter.length ? "Only enter during selected regimes." : "No filter"}</small>
+        </fieldset>
       </div>
 
       {!result ? (
