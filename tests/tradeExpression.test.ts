@@ -129,6 +129,55 @@ describe("trade expression engine", () => {
     const warnings = [...result.recommendedExpression.liquidityWarnings, ...result.blockedExpressions.flatMap((expression) => expression.liquidityWarnings)].join(" ");
     expect(warnings).toMatch(/Wide|open interest|spread/i);
   });
+
+  it("explains why option contracts were not selected", () => {
+    const result = buildTradeExpressionResult({
+      snapshot: makeBullishSnapshot(),
+      currentHoldings: [],
+      riskSettings: getDefaultRiskSettings(),
+      account: { equity: 100000, buyingPower: 100000, cash: 100000, paper: true },
+      options: [
+        makeOption({ symbol: "AAPL260619C00145000", type: "call", strikePrice: 145, closePrice: 4.5, bidPrice: 4.4, askPrice: 4.6, openInterest: null })
+      ],
+      preference: "leverage",
+      now
+    });
+
+    const call = result.blockedExpressions.find((expression) => expression.expressionType === "long_call");
+    expect(call?.optionSelectionDiagnostics).toMatchObject({
+      totalContracts: 1,
+      typeMatches: 1,
+      dteEligible: 1,
+      priceEligible: 1,
+      openInterestEligible: 0,
+      candidatesConsidered: 0
+    });
+    expect(call?.optionSelectionDiagnostics?.rejectionReasons.join(" ")).toMatch(/open-interest/i);
+  });
+
+  it("explains why a debit spread short leg was not selected", () => {
+    const result = buildTradeExpressionResult({
+      snapshot: makeBullishSnapshot(),
+      currentHoldings: [],
+      riskSettings: getDefaultRiskSettings(),
+      account: { equity: 100000, buyingPower: 100000, cash: 100000, paper: true },
+      options: [
+        makeOption({ symbol: "AAPL260619C00145000", type: "call", strikePrice: 145, closePrice: 4.5, bidPrice: 4.4, askPrice: 4.6, openInterest: 500 }),
+        makeOption({ symbol: "AAPL260619C00135000", type: "call", strikePrice: 135, closePrice: 6.5, bidPrice: 6.4, askPrice: 6.6, openInterest: 500 })
+      ],
+      preference: "defined_risk",
+      now
+    });
+
+    const spread = result.blockedExpressions.find((expression) => expression.expressionType === "bull_call_debit_spread");
+    expect(spread?.optionSelectionDiagnostics?.selectedSymbol).toBe("AAPL260619C00145000");
+    expect(spread?.optionSelectionDiagnostics?.spread).toMatchObject({
+      sameExpirationContracts: 1,
+      priceAndOpenInterestEligible: 1,
+      strikeSideEligible: 0
+    });
+    expect(spread?.optionSelectionDiagnostics?.rejectionReasons.join(" ")).toMatch(/short leg/i);
+  });
 });
 
 function makeBullishSnapshot(): SignalSnapshot {

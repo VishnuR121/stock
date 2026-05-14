@@ -4,6 +4,7 @@ import type {
   MultiLegPaperOrder,
   OptionIdea,
   OptionLeg,
+  OptionSelectionDiagnostics,
   PaperOrderRequest,
   PaperExecutionMode,
   RiskSettings,
@@ -355,7 +356,8 @@ function buildLongOption(
   optionType: "call" | "put",
   input: OptionExpressionInput
 ): TradeExpression {
-  const option = pickSingleOption(input.options, optionType, input.currentPrice);
+  const selection = selectSingleOption(input.options, optionType, input.currentPrice);
+  const option = selection.option;
   const price = getOptionPrice(option);
   const dte = option?.daysToExpiration ?? (option ? getDaysToExpiration(option.expirationDate, new Date()) : null);
   const maxLoss = price ? round(price * 100, 2) : null;
@@ -397,6 +399,7 @@ function buildLongOption(
     liquidityScore: option?.liquidityScore ?? null,
     paperExecutionMode: OPTIONS_PAPER_MODE,
     multiLegOrder: order,
+    optionSelectionDiagnostics: selection.diagnostics,
     timeHorizon: input.timeHorizon
   });
 }
@@ -406,9 +409,9 @@ function buildDebitSpread(
   optionType: "call" | "put",
   input: OptionExpressionInput
 ): TradeExpression {
-  const spread = pickDebitSpread(input.options, optionType, input.currentPrice);
+  const spread = selectDebitSpread(input.options, optionType, input.currentPrice);
   const metrics = getDebitSpreadMetrics({ type: optionType, longLeg: spread?.longLeg, shortLeg: spread?.shortLeg });
-  const dte = spread?.longLeg.daysToExpiration ?? null;
+  const dte = spread?.longLeg?.daysToExpiration ?? null;
   const requiredCapital = metrics.maxLoss;
   const errors = getOptionEligibilityErrors({ option: spread?.longLeg, price: metrics.netDebit, dte, maxLoss: metrics.maxLoss, requiredCapital, input });
   if (!spread?.shortLeg) errors.push("A matching short leg with the same expiration is required.");
@@ -455,9 +458,10 @@ function buildDebitSpread(
       "Reward is capped at the spread width less the debit."
     ],
     dte,
-    liquidityScore: averageScore(spread?.longLeg.liquidityScore, spread?.shortLeg.liquidityScore),
+    liquidityScore: averageScore(spread?.longLeg?.liquidityScore, spread?.shortLeg?.liquidityScore),
     paperExecutionMode: OPTIONS_PAPER_MODE,
     multiLegOrder: order,
+    optionSelectionDiagnostics: spread?.diagnostics ?? getSingleOptionDiagnostics(input.options, optionType, input.currentPrice, optionType === "call" ? "above" : "below"),
     timeHorizon: input.timeHorizon
   });
 }
@@ -474,7 +478,8 @@ function buildCoveredCall(input: {
   confidence: number;
   timeHorizon: string;
 }): TradeExpression {
-  const call = pickSingleOption(input.options, "call", input.currentPrice, "above");
+  const selection = selectSingleOption(input.options, "call", input.currentPrice, "above");
+  const call = selection.option;
   const metrics = getCoveredCallMetrics(input.currentPrice, call);
   const dte = call?.daysToExpiration ?? null;
   const errors = getOptionEligibilityErrors({
@@ -538,6 +543,7 @@ function buildCoveredCall(input: {
     liquidityScore: call?.liquidityScore ?? null,
     paperExecutionMode: OPTIONS_PAPER_MODE,
     multiLegOrder: order,
+    optionSelectionDiagnostics: selection.diagnostics,
     timeHorizon: input.timeHorizon
   });
 }
@@ -556,7 +562,8 @@ function buildCashSecuredPut(input: {
   timeHorizon: string;
   directionalFit: boolean;
 }): TradeExpression {
-  const put = pickSingleOption(input.options, "put", input.currentPrice, "below");
+  const selection = selectSingleOption(input.options, "put", input.currentPrice, "below");
+  const put = selection.option;
   const metrics = getCashSecuredPutMetrics(put);
   const dte = put?.daysToExpiration ?? null;
   const requiredCapital = put ? round(put.strikePrice * 100, 2) : null;
@@ -622,6 +629,7 @@ function buildCashSecuredPut(input: {
     liquidityScore: put?.liquidityScore ?? null,
     paperExecutionMode: OPTIONS_PAPER_MODE,
     multiLegOrder: order,
+    optionSelectionDiagnostics: selection.diagnostics,
     timeHorizon: input.timeHorizon
   });
 }
@@ -662,36 +670,109 @@ function getOptionEligibilityErrors(input: {
   return errors;
 }
 
-function pickSingleOption(
+function selectSingleOption(
   options: OptionIdea[],
   type: "call" | "put",
   price: number | null,
   moneyness: "above" | "below" = type === "call" ? "above" : "below"
-): OptionIdea | undefined {
-  const enriched = options
-    .filter((option) => option.type === type)
-    .filter((option) => (option.daysToExpiration ?? 0) >= 21 && (option.daysToExpiration ?? 0) <= 90)
-    .filter((option) => getOptionPrice(option) !== null)
-    .filter((option) => option.openInterest !== null && option.openInterest !== undefined);
+): { option?: OptionIdea; diagnostics: OptionSelectionDiagnostics } {
+  const eligible = getSingleOptionEligibleSets(options, type);
+  const dtePreferred = eligible.openInterestEligible.filter((option) => (option.daysToExpiration ?? 0) >= 30 && (option.daysToExpiration ?? 0) <= 60);
+  const candidates = dtePreferred.length ? dtePreferred : eligible.openInterestEligible;
+  const option = candidates.length
+    ? [...candidates].sort((left, right) => {
+      const leftMoneyness = getMoneynessDistance(left, price, moneyness);
+      const rightMoneyness = getMoneynessDistance(right, price, moneyness);
+      const leftDte = Math.abs((left.daysToExpiration ?? 45) - 45);
+      const rightDte = Math.abs((right.daysToExpiration ?? 45) - 45);
+      return leftMoneyness - rightMoneyness
+        || rightLiquidity(right) - rightLiquidity(left)
+        || leftDte - rightDte
+        || left.strikePrice - right.strikePrice;
+    })[0]
+    : undefined;
 
-  const dtePreferred = enriched.filter((option) => (option.daysToExpiration ?? 0) >= 30 && (option.daysToExpiration ?? 0) <= 60);
-  const candidates = dtePreferred.length ? dtePreferred : enriched;
-  if (!candidates.length) return undefined;
-  return [...candidates].sort((left, right) => {
-    const leftMoneyness = getMoneynessDistance(left, price, moneyness);
-    const rightMoneyness = getMoneynessDistance(right, price, moneyness);
-    const leftDte = Math.abs((left.daysToExpiration ?? 45) - 45);
-    const rightDte = Math.abs((right.daysToExpiration ?? 45) - 45);
-    return leftMoneyness - rightMoneyness
-      || rightLiquidity(right) - rightLiquidity(left)
-      || leftDte - rightDte
-      || left.strikePrice - right.strikePrice;
-  })[0];
+  return {
+    option,
+    diagnostics: buildSingleOptionDiagnostics({
+      options,
+      type,
+      moneyness,
+      eligible,
+      candidatesConsidered: candidates.length,
+      selected: option
+    })
+  };
 }
 
-function pickDebitSpread(options: OptionIdea[], type: "call" | "put", price: number | null): { longLeg: OptionIdea; shortLeg: OptionIdea } | undefined {
-  const longLeg = pickSingleOption(options, type, price, type === "call" ? "above" : "below");
-  if (!longLeg) return undefined;
+function getSingleOptionDiagnostics(
+  options: OptionIdea[],
+  type: "call" | "put",
+  price: number | null,
+  moneyness: "above" | "below" = type === "call" ? "above" : "below"
+): OptionSelectionDiagnostics {
+  return selectSingleOption(options, type, price, moneyness).diagnostics;
+}
+
+function getSingleOptionEligibleSets(options: OptionIdea[], type: "call" | "put") {
+  const typeMatches = options.filter((option) => option.type === type);
+  const dteEligible = typeMatches
+    .filter((option) => option.type === type)
+    .filter((option) => (option.daysToExpiration ?? 0) >= 21 && (option.daysToExpiration ?? 0) <= 90);
+  const priceEligible = dteEligible.filter((option) => getOptionPrice(option) !== null);
+  const openInterestEligible = priceEligible.filter((option) => option.openInterest !== null && option.openInterest !== undefined);
+  const preferredDteEligible = openInterestEligible.filter((option) => (option.daysToExpiration ?? 0) >= 30 && (option.daysToExpiration ?? 0) <= 60);
+
+  return {
+    typeMatches,
+    dteEligible,
+    priceEligible,
+    openInterestEligible,
+    preferredDteEligible
+  };
+}
+
+function buildSingleOptionDiagnostics(input: {
+  options: OptionIdea[];
+  type: "call" | "put";
+  moneyness: "above" | "below";
+  eligible: ReturnType<typeof getSingleOptionEligibleSets>;
+  candidatesConsidered: number;
+  selected?: OptionIdea;
+}): OptionSelectionDiagnostics {
+  const rejectionReasons: string[] = [];
+  if (!input.options.length) rejectionReasons.push("No option contracts were loaded for this underlying.");
+  if (!input.eligible.typeMatches.length) rejectionReasons.push(`No ${input.type} contracts were loaded.`);
+  if (input.eligible.typeMatches.length && !input.eligible.dteEligible.length) rejectionReasons.push("No contracts were inside the 21-90 DTE selection window.");
+  if (input.eligible.dteEligible.length && !input.eligible.priceEligible.length) rejectionReasons.push("No DTE-eligible contracts had valid mid, last, or close pricing.");
+  if (input.eligible.priceEligible.length && !input.eligible.openInterestEligible.length) rejectionReasons.push("No priced contracts had open-interest data for liquidity screening.");
+  if (input.eligible.openInterestEligible.length && !input.eligible.preferredDteEligible.length) rejectionReasons.push("No priced/liquid contracts were in the preferred 30-60 DTE window; using the broader 21-90 DTE pool.");
+
+  return {
+    optionType: input.type,
+    moneyness: input.moneyness,
+    totalContracts: input.options.length,
+    typeMatches: input.eligible.typeMatches.length,
+    dteEligible: input.eligible.dteEligible.length,
+    priceEligible: input.eligible.priceEligible.length,
+    openInterestEligible: input.eligible.openInterestEligible.length,
+    preferredDteEligible: input.eligible.preferredDteEligible.length,
+    candidatesConsidered: input.candidatesConsidered,
+    selectedSymbol: input.selected?.symbol,
+    selectedExpiration: input.selected?.expirationDate,
+    selectedStrike: input.selected?.strikePrice,
+    rejectionReasons
+  };
+}
+
+function selectDebitSpread(
+  options: OptionIdea[],
+  type: "call" | "put",
+  price: number | null
+): { longLeg?: OptionIdea; shortLeg?: OptionIdea; diagnostics: OptionSelectionDiagnostics } {
+  const longSelection = selectSingleOption(options, type, price, type === "call" ? "above" : "below");
+  const longLeg = longSelection.option;
+  if (!longLeg) return { diagnostics: longSelection.diagnostics };
   const sameExpiry = options
     .filter((option) => option.type === type && option.expirationDate === longLeg.expirationDate && option.symbol !== longLeg.symbol)
     .filter((option) => getOptionPrice(option) !== null && option.openInterest !== null && option.openInterest !== undefined);
@@ -703,7 +784,22 @@ function pickDebitSpread(options: OptionIdea[], type: "call" | "put", price: num
     const widthRight = Math.abs(right.strikePrice - longLeg.strikePrice);
     return widthLeft - widthRight || rightLiquidity(right) - rightLiquidity(left);
   })[0];
-  return shortLeg ? { longLeg, shortLeg } : undefined;
+  return {
+    longLeg,
+    shortLeg,
+    diagnostics: {
+      ...longSelection.diagnostics,
+      rejectionReasons: shortLeg
+        ? longSelection.diagnostics.rejectionReasons
+        : [...longSelection.diagnostics.rejectionReasons, "No same-expiration short leg passed pricing, open-interest, and strike-side filters."],
+      spread: {
+        sameExpirationContracts: options.filter((option) => option.type === type && option.expirationDate === longLeg.expirationDate && option.symbol !== longLeg.symbol).length,
+        priceAndOpenInterestEligible: sameExpiry.length,
+        strikeSideEligible: shortCandidates.length,
+        selectedShortSymbol: shortLeg?.symbol
+      }
+    }
+  };
 }
 
 function getOptionWarnings(option: OptionIdea | undefined, dte: number | null, earningsWarnings: string[]) {
@@ -793,6 +889,7 @@ function expression(input: {
   paperExecutionMode?: PaperExecutionMode;
   order?: PaperOrderRequest;
   multiLegOrder?: MultiLegPaperOrder;
+  optionSelectionDiagnostics?: OptionSelectionDiagnostics;
   timeHorizon: string;
 }): TradeExpression {
   return {
@@ -819,7 +916,8 @@ function expression(input: {
     liquidityScore: input.liquidityScore,
     paperExecutionMode: input.paperExecutionMode,
     order: input.order,
-    multiLegOrder: input.multiLegOrder
+    multiLegOrder: input.multiLegOrder,
+    optionSelectionDiagnostics: input.optionSelectionDiagnostics
   };
 }
 

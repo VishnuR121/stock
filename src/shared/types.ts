@@ -850,6 +850,28 @@ export interface OptionIdea {
   liquidityWarning: string | null;
 }
 
+export interface OptionSelectionDiagnostics {
+  optionType: OptionType;
+  moneyness: "above" | "below";
+  totalContracts: number;
+  typeMatches: number;
+  dteEligible: number;
+  priceEligible: number;
+  openInterestEligible: number;
+  preferredDteEligible: number;
+  candidatesConsidered: number;
+  selectedSymbol?: string;
+  selectedExpiration?: string;
+  selectedStrike?: number;
+  rejectionReasons: string[];
+  spread?: {
+    sameExpirationContracts: number;
+    priceAndOpenInterestEligible: number;
+    strikeSideEligible: number;
+    selectedShortSymbol?: string;
+  };
+}
+
 export interface TradeExpression {
   id: string;
   expressionType: TradeExpressionType;
@@ -875,6 +897,7 @@ export interface TradeExpression {
   paperExecutionMode?: PaperExecutionMode;
   order?: PaperOrderRequest;
   multiLegOrder?: MultiLegPaperOrder;
+  optionSelectionDiagnostics?: OptionSelectionDiagnostics;
 }
 
 export interface TradeExpressionResult {

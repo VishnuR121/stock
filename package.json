@@ -21,7 +21,6 @@
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
-    "drizzle-orm": "^0.45.2",
     "express": "^4.21.2",
     "lucide-react": "^0.468.0",
     "postgres": "^3.4.9",
@@ -41,6 +40,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
     "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "^0.45.2",
     "jsdom": "^25.0.1",
     "supertest": "^7.0.0",
     "tsx": "^4.19.2",

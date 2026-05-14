@@ -2733,6 +2733,9 @@ function TradeExpressionPanel({
           </div>
           <p>{selected.rationale.join(" ")}</p>
           {selected.statusReasons.length > 0 && <small>{selected.statusReasons.join(" ")}</small>}
+          {selected.optionSelectionDiagnostics && (
+            <OptionSelectionDiagnosticsCard expression={selected} />
+          )}
           {selected.multiLegOrder && (
             <div className="legList">
               {selected.multiLegOrder.legs.map((leg) => (
@@ -2754,6 +2757,69 @@ function TradeExpressionPanel({
         </article>
       )}
     </section>
+  );
+}
+
+function OptionSelectionDiagnosticsCard({ expression }: { expression: TradeExpression }) {
+  const diagnostics = expression.optionSelectionDiagnostics;
+  if (!diagnostics) return null;
+  const rows = [
+    ["Loaded", diagnostics.totalContracts],
+    [`${diagnostics.optionType}s`, diagnostics.typeMatches],
+    ["21-90 DTE", diagnostics.dteEligible],
+    ["Priced", diagnostics.priceEligible],
+    ["Open interest", diagnostics.openInterestEligible],
+    ["30-60 DTE", diagnostics.preferredDteEligible],
+    ["Considered", diagnostics.candidatesConsidered]
+  ];
+
+  return (
+    <div className="selectionDiagnostics" aria-label="Option contract selection diagnostics">
+      <div className="selectionDiagnosticsHeader">
+        <div>
+          <span>Contract selection</span>
+          <strong>{diagnostics.selectedSymbol ?? "No contract selected"}</strong>
+        </div>
+        {diagnostics.selectedExpiration && (
+          <em>{diagnostics.selectedExpiration} / {formatCurrency(diagnostics.selectedStrike)}</em>
+        )}
+      </div>
+      <div className="selectionDiagnosticGrid">
+        {rows.map(([label, value]) => (
+          <span key={label}>
+            <small>{label}</small>
+            <strong>{value}</strong>
+          </span>
+        ))}
+      </div>
+      {diagnostics.spread && (
+        <div className="selectionDiagnosticGrid spread">
+          <span>
+            <small>Same expiry</small>
+            <strong>{diagnostics.spread.sameExpirationContracts}</strong>
+          </span>
+          <span>
+            <small>Priced OI</small>
+            <strong>{diagnostics.spread.priceAndOpenInterestEligible}</strong>
+          </span>
+          <span>
+            <small>Strike side</small>
+            <strong>{diagnostics.spread.strikeSideEligible}</strong>
+          </span>
+          <span>
+            <small>Short leg</small>
+            <strong>{diagnostics.spread.selectedShortSymbol ?? "--"}</strong>
+          </span>
+        </div>
+      )}
+      {diagnostics.rejectionReasons.length > 0 && (
+        <div className="selectionReasons">
+          {diagnostics.rejectionReasons.slice(0, 4).map((reason) => (
+            <p key={reason}>{reason}</p>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

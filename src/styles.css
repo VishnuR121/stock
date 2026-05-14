@@ -2411,6 +2411,71 @@ select {
   font-size: 0.82rem;
 }
 
+.selectionDiagnostics {
+  display: grid;
+  gap: 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface);
+}
+
+.selectionDiagnosticsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.selectionDiagnosticsHeader span,
+.selectionDiagnosticGrid small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.selectionDiagnosticsHeader em {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.selectionDiagnosticGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.selectionDiagnosticGrid.spread {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.selectionDiagnosticGrid span {
+  min-width: 0;
+  border-radius: 8px;
+  padding: 7px;
+  background: var(--surface-muted);
+}
+
+.selectionDiagnosticGrid strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.selectionReasons {
+  display: grid;
+  gap: 5px;
+}
+
+.selectionReasons p {
+  margin: 0;
+  color: var(--warn-text);
+  font-size: 0.8rem;
+}
+
 .specialistGrid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -2626,9 +2691,15 @@ th {
   }
 
   .expressionDetailTop,
-  .expressionHeader {
+  .expressionHeader,
+  .selectionDiagnosticsHeader {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .selectionDiagnosticGrid,
+  .selectionDiagnosticGrid.spread {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .journalReviewForm .journalNotesField {
