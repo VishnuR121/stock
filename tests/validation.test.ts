@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getDefaultRiskProfile } from "../server/indicators";
-import { validatePaperOrder } from "../server/validation";
+import { validateMultiLegPaperOrder, validatePaperOrder } from "../server/validation";
+import { getDefaultRiskSettings } from "../server/storage";
 
 describe("paper order validation", () => {
   const riskProfile = getDefaultRiskProfile(100000);
@@ -165,4 +166,124 @@ describe("paper order validation", () => {
     expect(result.estimatedNotional).toBe(1000);
     expect(result.estimatedRisk).toBe(50);
   });
+
+  it("validates long call paper simulation max loss and paper-only confirmations", () => {
+    const result = validateMultiLegPaperOrder(
+      makeOptionOrder({
+        expressionType: "long_call",
+        legs: [makeLeg({ optionSymbol: "AAPL260619C00145000", optionType: "call", side: "buy", strike: 145 })],
+        estimatedDebit: 450,
+        maxLoss: 450,
+        breakeven: 149.5,
+        requiredCapital: 450
+      }),
+      riskProfile,
+      getDefaultRiskSettings(),
+      { buyingPower: 100000, alpacaPaperOnly: true, now: new Date("2026-05-14T15:00:00Z") }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.estimatedRisk).toBe(450);
+  });
+
+  it("blocks naked calls and research-only multi-leg orders", () => {
+    const result = validateMultiLegPaperOrder(
+      makeOptionOrder({
+        expressionType: "covered_call",
+        legs: [makeLeg({ optionSymbol: "AAPL260619C00145000", optionType: "call", side: "sell", strike: 145 })],
+        paperExecutionMode: "research_only",
+        maxLoss: 1000,
+        requiredCapital: 0
+      }),
+      riskProfile,
+      getDefaultRiskSettings(),
+      { buyingPower: 100000, alpacaPaperOnly: true, now: new Date("2026-05-14T15:00:00Z") }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toMatch(/Research-only|Undefined-risk|naked/i);
+  });
+
+  it("blocks 0DTE options by default and warns on wide bid/ask spreads", () => {
+    const result = validateMultiLegPaperOrder(
+      makeOptionOrder({
+        expressionType: "long_put",
+        legs: [makeLeg({ optionSymbol: "AAPL260514P00135000", optionType: "put", side: "buy", strike: 135, expiration: "2026-05-14", bid: 1, ask: 1.5 })],
+        estimatedDebit: 125,
+        maxLoss: 125,
+        breakeven: 133.75,
+        requiredCapital: 125
+      }),
+      riskProfile,
+      getDefaultRiskSettings(),
+      { buyingPower: 100000, alpacaPaperOnly: true, now: new Date("2026-05-14T15:00:00Z") }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toMatch(/0DTE/);
+    expect(result.warnings.join(" ")).toMatch(/wide bid\/ask/i);
+  });
+
+  it("blocks option paper orders when the kill switch or live endpoint is active", () => {
+    const result = validateMultiLegPaperOrder(
+      makeOptionOrder({
+        expressionType: "bull_call_debit_spread",
+        legs: [
+          makeLeg({ optionSymbol: "AAPL260619C00145000", optionType: "call", side: "buy", strike: 145 }),
+          makeLeg({ optionSymbol: "AAPL260619C00150000", optionType: "call", side: "sell", strike: 150 })
+        ],
+        estimatedDebit: 220,
+        maxLoss: 220,
+        maxProfit: 280,
+        breakeven: 147.2,
+        requiredCapital: 220
+      }),
+      riskProfile,
+      { ...getDefaultRiskSettings(), killSwitchEnabled: true },
+      { buyingPower: 100000, alpacaPaperOnly: false, now: new Date("2026-05-14T15:00:00Z") }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toMatch(/kill switch/);
+    expect(result.errors.join(" ")).toMatch(/Live Alpaca/);
+  });
 });
+
+function makeOptionOrder(patch: Record<string, unknown>) {
+  return {
+    expressionType: "long_call",
+    underlyingSymbol: "AAPL",
+    legs: [makeLeg({ optionSymbol: "AAPL260619C00145000", optionType: "call", side: "buy", strike: 145 })],
+    estimatedDebit: 450,
+    maxLoss: 450,
+    requiredCapital: 450,
+    paperExecutionMode: "internal_simulation",
+    timeHorizon: "30-60 DTE swing options",
+    earningsChecked: true,
+    confirmedPaperOnly: true,
+    acceptedRisk: true,
+    maxLossAcknowledged: true,
+    paperSimulationAcknowledged: true,
+    noLiveEndpointAcknowledged: true,
+    ...patch
+  };
+}
+
+function makeLeg(patch: Record<string, unknown>) {
+  return {
+    optionSymbol: "AAPL260619C00145000",
+    underlyingSymbol: "AAPL",
+    optionType: "call",
+    side: "buy",
+    quantity: 1,
+    strike: 145,
+    expiration: "2026-06-19",
+    limitPrice: 4.5,
+    estimatedMid: 4.5,
+    bid: 4.4,
+    ask: 4.6,
+    openInterest: 250,
+    volume: 100,
+    ...patch
+  };
+}

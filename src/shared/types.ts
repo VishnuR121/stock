@@ -10,6 +10,7 @@ export type TradeAction =
   | "watch"
   | "paper_long_candidate"
   | "paper_short_candidate"
+  | "paper_options_candidate"
   | "options_research_only";
 export type TradeHorizon = "intraday" | "swing" | "position" | "options_short_term";
 export type JournalStatus = "watching" | "paper_open" | "paper_closed" | "skipped";
@@ -40,6 +41,23 @@ export type OpportunityCategory =
   | "neutral_income"
   | "watch_only";
 export type RankingAction = "buy" | "watch" | "avoid" | "hold";
+export type TradeExpressionType =
+  | "long_equity"
+  | "short_equity"
+  | "long_call"
+  | "long_put"
+  | "covered_call"
+  | "cash_secured_put"
+  | "bull_call_debit_spread"
+  | "bear_put_debit_spread"
+  | "credit_spread_research"
+  | "iron_condor_research"
+  | "no_trade";
+export type TradeExpressionDirection = "bullish" | "bearish" | "neutral";
+export type TradeExpressionStatus = "research_only" | "paper_trade_allowed" | "blocked";
+export type TradeExpressionPreference = "simple" | "defined_risk" | "income" | "leverage" | "capital_efficient";
+export type AssetClass = "equity" | "option" | "multi_leg_option";
+export type PaperExecutionMode = "broker_paper" | "internal_simulation" | "research_only";
 
 export interface WatchlistItem {
   symbol: string;
@@ -149,6 +167,10 @@ export interface RiskSettings {
   priceCollarPct: number;
   earningsWindowDays: number;
   killSwitchEnabled: boolean;
+  maxOpenPositions?: number;
+  maxOptionsContracts?: number;
+  maxStrategyExposurePct?: number;
+  allowZeroDte?: boolean;
 }
 
 export interface TradePlan {
@@ -272,6 +294,7 @@ export interface TradeContext {
 export interface EnrichedTradePlanResponse {
   plan: TradePlan;
   quantitativePlan?: DeterministicTradePlan;
+  tradeExpressionResult?: TradeExpressionResult;
   context: TradeContext;
   savedPlan: SavedTradePlan;
 }
@@ -376,6 +399,7 @@ export interface AnalysisRun {
   specialistReports: SpecialistReport[];
   safetyBlockers: SafetyBlocker[];
   strategyCandidates: StrategyCandidate[];
+  tradeExpressionResult?: TradeExpressionResult;
   managerVerdict: ManagerVerdict;
 }
 
@@ -441,6 +465,60 @@ export interface PositionMonitorSnapshot {
     watchCount: number;
     totalUnrealizedPl: number | null;
   };
+}
+
+export type SimulatedOptionQuoteStatus = "live_quote" | "entry_estimate" | "missing_pricing";
+
+export interface SimulatedOptionsPosition {
+  id: string;
+  journalEntryId: string;
+  symbol: string;
+  underlyingSymbol: string;
+  expressionType?: TradeExpressionType;
+  openedAt: string;
+  status: JournalStatus;
+  legs: OptionLeg[];
+  entryValue: number;
+  currentValue: number;
+  maxLoss?: number;
+  maxProfit?: number;
+  breakeven?: number;
+  requiredCapital?: number;
+  daysToExpiration: number | null;
+  unrealizedPnL: number;
+  unrealizedPnLPct: number | null;
+  realizedPnL?: number;
+  actualRMultiple?: number;
+  paperExecutionMode?: PaperExecutionMode;
+  quoteStatus: SimulatedOptionQuoteStatus;
+  exitUrgency: ExitUrgency;
+  suggestedAction: string;
+  exitReasons: string[];
+  warnings: string[];
+}
+
+export interface OptionsExposureBucket {
+  key: string;
+  count: number;
+  maxLoss: number;
+  requiredCapital: number;
+  unrealizedPnL: number;
+}
+
+export interface OptionsExposureSummary {
+  totalOpenSimulations: number;
+  totalMaxLoss: number;
+  totalRequiredCapital: number;
+  totalUnrealizedPnL: number;
+  byUnderlying: OptionsExposureBucket[];
+  byExpressionType: OptionsExposureBucket[];
+  byDteBucket: OptionsExposureBucket[];
+}
+
+export interface SimulatedOptionsSnapshot {
+  generatedAt: string;
+  positions: SimulatedOptionsPosition[];
+  exposure: OptionsExposureSummary;
 }
 
 export interface OpportunityCandidate {
@@ -566,6 +644,26 @@ export interface TradeJournalEntry {
   takeProfitPrice?: number;
   outcome?: "win" | "loss" | "breakeven" | "open";
   pnl?: number;
+  expressionType?: TradeExpressionType;
+  underlyingSymbol?: string;
+  assetClass?: AssetClass;
+  optionLegs?: OptionLeg[];
+  maxLoss?: number;
+  maxProfit?: number;
+  breakeven?: number;
+  requiredCapital?: number;
+  entryThesis?: string;
+  exitThesis?: string;
+  entryMarketRegime?: MarketRegimeLabel;
+  entryScore?: number;
+  aiConfidence?: "low" | "medium" | "high";
+  paperExecutionMode?: PaperExecutionMode;
+  brokerOrderIds?: string[];
+  optionsMetadata?: Record<string, unknown>;
+  strategyWarnings?: string[];
+  realizedPnL?: number;
+  actualRMultiple?: number;
+  strategyCategory?: string;
 }
 
 export interface JournalTradeHighlight {
@@ -573,6 +671,23 @@ export interface JournalTradeHighlight {
   symbol: string;
   pnl: number;
   rMultiple: number | null;
+}
+
+export interface JournalExpressionStat {
+  key: string;
+  trades: number;
+  closedTrades: number;
+  winRate: number;
+  averageR: number | null;
+  totalPnl: number;
+}
+
+export interface JournalOptionsMetrics {
+  averageDteAtEntry: number | null;
+  performanceByDteBucket: JournalExpressionStat[];
+  performanceByOptionType: JournalExpressionStat[];
+  performanceByStructure: JournalExpressionStat[];
+  assignmentRiskEvents: number;
 }
 
 export interface JournalAnalytics {
@@ -590,6 +705,13 @@ export interface JournalAnalytics {
   worstTrade: JournalTradeHighlight | null;
   mostCommonSkippedReason: string | null;
   mostCommonExitReason: JournalExitReason | null;
+  performanceByExpressionType: JournalExpressionStat[];
+  performanceByUnderlying: JournalExpressionStat[];
+  performanceByMarketRegime: JournalExpressionStat[];
+  performanceByAiConfidence: JournalExpressionStat[];
+  winRateByExpressionType: JournalExpressionStat[];
+  averageRByExpressionType: JournalExpressionStat[];
+  optionsMetrics: JournalOptionsMetrics;
 }
 
 export interface PaperOrderRequest {
@@ -629,6 +751,56 @@ export interface OptionOrderRequest {
   acceptedRisk: boolean;
 }
 
+export interface OptionLeg {
+  optionSymbol: string;
+  underlyingSymbol: string;
+  optionType: OptionType;
+  side: "buy" | "sell";
+  quantity: number;
+  strike: number;
+  expiration: string;
+  limitPrice?: number;
+  estimatedMid?: number;
+  bid?: number;
+  ask?: number;
+  last?: number;
+  delta?: number;
+  theta?: number;
+  vega?: number;
+  impliedVolatility?: number;
+  openInterest?: number | null;
+  volume?: number | null;
+  liquidityScore?: number | null;
+}
+
+export interface MultiLegPaperOrder {
+  expressionType: TradeExpressionType;
+  underlyingSymbol: string;
+  legs: OptionLeg[];
+  estimatedDebit?: number;
+  estimatedCredit?: number;
+  maxLoss: number;
+  maxProfit?: number;
+  breakeven?: number;
+  requiredCapital: number;
+  paperExecutionMode: PaperExecutionMode;
+}
+
+export interface MultiLegPaperOrderRequest extends MultiLegPaperOrder {
+  timeHorizon: string;
+  earningsChecked: boolean;
+  confirmedPaperOnly: boolean;
+  acceptedRisk: boolean;
+  maxLossAcknowledged: boolean;
+  paperSimulationAcknowledged: boolean;
+  noLiveEndpointAcknowledged: boolean;
+  sourcePlanId?: string;
+  sourceSignalAsOf?: string;
+  sourceAnalysisId?: string;
+  sourceExpressionId?: string;
+  followedPlan?: boolean;
+}
+
 export interface PaperOrderValidationResult {
   ok: boolean;
   errors: string[];
@@ -639,6 +811,15 @@ export interface PaperOrderValidationResult {
   targetRealism?: TargetRealismResult;
 }
 
+export interface MultiLegPaperOrderValidationResult {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  estimatedNotional: number | null;
+  estimatedRisk: number | null;
+  order?: MultiLegPaperOrderRequest;
+}
+
 export interface OptionIdea {
   symbol: string;
   underlyingSymbol: string;
@@ -646,6 +827,11 @@ export interface OptionIdea {
   expirationDate: string;
   strikePrice: number;
   closePrice: number | null;
+  bidPrice?: number | null;
+  askPrice?: number | null;
+  midPrice?: number | null;
+  lastPrice?: number | null;
+  volume?: number | null;
   openInterest: number | null;
   breakeven: number | null;
   maxLoss: number | null;
@@ -659,7 +845,62 @@ export interface OptionIdea {
   theta?: number | null;
   vega?: number | null;
   probabilityOfProfit?: number | null;
+  spreadWidthPct?: number | null;
+  liquidityScore?: number | null;
   liquidityWarning: string | null;
+}
+
+export interface TradeExpression {
+  id: string;
+  expressionType: TradeExpressionType;
+  underlyingSymbol: string;
+  direction: TradeExpressionDirection;
+  timeHorizon: string;
+  confidence: number;
+  maxLoss: number | null;
+  maxProfit?: number | null;
+  breakeven?: number | null;
+  requiredCapital: number | null;
+  liquidityWarnings: string[];
+  volatilityWarnings: string[];
+  earningsWarnings: string[];
+  assignmentWarnings: string[];
+  riskReward: number | null;
+  rationale: string[];
+  alternatives: TradeExpressionType[];
+  status: TradeExpressionStatus;
+  statusReasons: string[];
+  dte?: number | null;
+  liquidityScore?: number | null;
+  paperExecutionMode?: PaperExecutionMode;
+  order?: PaperOrderRequest;
+  multiLegOrder?: MultiLegPaperOrder;
+}
+
+export interface TradeExpressionResult {
+  generatedAt: string;
+  underlyingSymbol: string;
+  preference: TradeExpressionPreference;
+  thesis: {
+    ticker: string;
+    marketRegime?: MarketRegimeLabel | null;
+    bias: SignalBias;
+    confidence: number;
+    timeHorizon: string;
+    entryThesis: string;
+    invalidation: string;
+  };
+  recommendedExpression: TradeExpression;
+  alternatives: TradeExpression[];
+  blockedExpressions: TradeExpression[];
+  riskWarnings: string[];
+  paperEligibility: {
+    paperOnly: boolean;
+    liveTradingBlocked: boolean;
+    killSwitchEnabled: boolean;
+    optionsPaperMode: PaperExecutionMode;
+    notes: string[];
+  };
 }
 
 export interface CachedSignalSnapshot {

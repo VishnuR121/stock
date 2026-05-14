@@ -466,7 +466,27 @@ export class DatabaseStore implements AppStore {
       stopLossPrice: numberOrUndefined(row.stopLossPrice),
       takeProfitPrice: numberOrUndefined(row.takeProfitPrice),
       outcome: row.outcome ?? undefined,
-      pnl: numberOrUndefined(row.pnl)
+      pnl: numberOrUndefined(row.pnl),
+      expressionType: row.expressionType ?? undefined,
+      underlyingSymbol: row.underlyingSymbol ?? undefined,
+      assetClass: row.assetClass ?? undefined,
+      optionLegs: row.optionLegs ?? undefined,
+      maxLoss: numberOrUndefined(row.maxLoss),
+      maxProfit: numberOrUndefined(row.maxProfit),
+      breakeven: numberOrUndefined(row.breakeven),
+      requiredCapital: numberOrUndefined(row.requiredCapital),
+      entryThesis: row.entryThesis ?? undefined,
+      exitThesis: row.exitThesis ?? undefined,
+      entryMarketRegime: row.entryMarketRegime ?? undefined,
+      entryScore: row.entryScore ?? undefined,
+      aiConfidence: row.aiConfidence ?? undefined,
+      paperExecutionMode: row.paperExecutionMode ?? undefined,
+      brokerOrderIds: row.brokerOrderIds ?? undefined,
+      optionsMetadata: row.optionsMetadata ?? undefined,
+      strategyWarnings: row.strategyWarnings ?? undefined,
+      realizedPnL: numberOrUndefined(row.realizedPnL),
+      actualRMultiple: numberOrUndefined(row.actualRMultiple),
+      strategyCategory: row.strategyCategory ?? undefined
     }));
   }
 
@@ -606,7 +626,27 @@ export class DatabaseStore implements AppStore {
         stopLossPrice: valueOrNull(entry.stopLossPrice),
         takeProfitPrice: valueOrNull(entry.takeProfitPrice),
         outcome: entry.outcome ?? null,
-        pnl: valueOrNull(entry.pnl)
+        pnl: valueOrNull(entry.pnl),
+        expressionType: entry.expressionType ?? null,
+        underlyingSymbol: entry.underlyingSymbol ?? null,
+        assetClass: entry.assetClass ?? null,
+        optionLegs: entry.optionLegs ?? null,
+        maxLoss: valueOrNull(entry.maxLoss),
+        maxProfit: valueOrNull(entry.maxProfit),
+        breakeven: valueOrNull(entry.breakeven),
+        requiredCapital: valueOrNull(entry.requiredCapital),
+        entryThesis: entry.entryThesis ?? null,
+        exitThesis: entry.exitThesis ?? null,
+        entryMarketRegime: entry.entryMarketRegime ?? null,
+        entryScore: entry.entryScore ?? null,
+        aiConfidence: entry.aiConfidence ?? null,
+        paperExecutionMode: entry.paperExecutionMode ?? null,
+        brokerOrderIds: entry.brokerOrderIds ?? null,
+        optionsMetadata: entry.optionsMetadata ?? null,
+        strategyWarnings: entry.strategyWarnings ?? null,
+        realizedPnL: valueOrNull(entry.realizedPnL),
+        actualRMultiple: valueOrNull(entry.actualRMultiple),
+        strategyCategory: entry.strategyCategory ?? null
       })
       .onConflictDoUpdate({
         target: journalEntries.id,
@@ -626,7 +666,27 @@ export class DatabaseStore implements AppStore {
           stopLossPrice: valueOrNull(entry.stopLossPrice),
           takeProfitPrice: valueOrNull(entry.takeProfitPrice),
           outcome: entry.outcome ?? null,
-          pnl: valueOrNull(entry.pnl)
+          pnl: valueOrNull(entry.pnl),
+          expressionType: entry.expressionType ?? null,
+          underlyingSymbol: entry.underlyingSymbol ?? null,
+          assetClass: entry.assetClass ?? null,
+          optionLegs: entry.optionLegs ?? null,
+          maxLoss: valueOrNull(entry.maxLoss),
+          maxProfit: valueOrNull(entry.maxProfit),
+          breakeven: valueOrNull(entry.breakeven),
+          requiredCapital: valueOrNull(entry.requiredCapital),
+          entryThesis: entry.entryThesis ?? null,
+          exitThesis: entry.exitThesis ?? null,
+          entryMarketRegime: entry.entryMarketRegime ?? null,
+          entryScore: entry.entryScore ?? null,
+          aiConfidence: entry.aiConfidence ?? null,
+          paperExecutionMode: entry.paperExecutionMode ?? null,
+          brokerOrderIds: entry.brokerOrderIds ?? null,
+          optionsMetadata: entry.optionsMetadata ?? null,
+          strategyWarnings: entry.strategyWarnings ?? null,
+          realizedPnL: valueOrNull(entry.realizedPnL),
+          actualRMultiple: valueOrNull(entry.actualRMultiple),
+          strategyCategory: entry.strategyCategory ?? null
         }
       });
   }

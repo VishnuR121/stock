@@ -1090,6 +1090,33 @@ h3 {
   font-weight: 850;
 }
 
+.exposureBuckets,
+.optionLegList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.exposureBuckets span,
+.optionLegList span {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 7px 9px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.exposureBuckets strong {
+  display: block;
+  color: var(--text);
+}
+
+.optionLegList.compact span {
+  padding: 6px 8px;
+}
+
 .monitorList {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1129,6 +1156,10 @@ h3 {
   color: var(--text-muted);
   font-weight: 800;
   line-height: 1.35;
+}
+
+.monitorCard small.warningText {
+  color: var(--warn-text);
 }
 
 .detailHeader {
@@ -2264,6 +2295,122 @@ select {
   font-style: normal;
 }
 
+.expressionPanel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.expressionHeader {
+  align-items: center;
+}
+
+.expressionHeader select {
+  min-height: 36px;
+  min-width: 150px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.expressionThesis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.expressionThesis div,
+.expressionDetail {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.expressionThesis div {
+  padding: 10px;
+}
+
+.expressionThesis span,
+.expressionDetailTop span,
+.legList span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.expressionTable table {
+  min-width: 980px;
+}
+
+.expressionTable tr {
+  cursor: pointer;
+}
+
+.expressionTable tr.selectedRow td {
+  background: var(--accent-soft);
+}
+
+.expressionDetail {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.expressionDetail.blocked {
+  border-color: var(--danger-border);
+  background: var(--danger-surface);
+}
+
+.expressionDetail.research_only {
+  border-color: var(--warn-border);
+  background: var(--warn-surface);
+}
+
+.expressionDetailTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.legList {
+  display: grid;
+  gap: 8px;
+}
+
+.legList div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.legList strong,
+.legList small {
+  overflow-wrap: anywhere;
+}
+
+.expressionWarnings {
+  display: grid;
+  gap: 6px;
+}
+
+.expressionWarnings p {
+  margin: 0;
+  color: var(--warn-text);
+  font-size: 0.82rem;
+}
+
 .specialistGrid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -2359,6 +2506,10 @@ th {
   box-shadow: 0 24px 80px var(--shadow);
 }
 
+.modal.optionsModal {
+  width: min(680px, 100%);
+}
+
 .reviewList {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2383,6 +2534,7 @@ th {
 
 @media (max-width: 1180px) {
   .statusGrid,
+  .expressionThesis,
   .signalGrid,
   .focusGrid,
   .twoColumnSurface,
@@ -2441,6 +2593,7 @@ th {
   }
 
   .statusGrid,
+  .expressionThesis,
   .signalGrid,
   .focusGrid,
   .workspaceTabs,
@@ -2470,6 +2623,12 @@ th {
   .journalReviewForm,
   .reviewList {
     grid-template-columns: 1fr;
+  }
+
+  .expressionDetailTop,
+  .expressionHeader {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .journalReviewForm .journalNotesField {

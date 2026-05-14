@@ -117,6 +117,21 @@ describe("dashboard", () => {
       if (target.endsWith("/api/algo/proposals")) {
         return jsonResponse(algoProposals);
       }
+      if (target.endsWith("/api/paper/options-simulations")) {
+        return jsonResponse({
+          generatedAt: "2026-05-13T14:00:00.000Z",
+          positions: [],
+          exposure: {
+            totalOpenSimulations: 0,
+            totalMaxLoss: 0,
+            totalRequiredCapital: 0,
+            totalUnrealizedPnL: 0,
+            byUnderlying: [],
+            byExpressionType: [],
+            byDteBucket: []
+          }
+        });
+      }
       if (target.includes("/api/algo/proposals/") && init?.method === "DELETE") {
         const id = target.split("/api/algo/proposals/")[1];
         algoProposals = algoProposals.filter((proposal) => proposal.id !== id);

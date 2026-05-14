@@ -1,4 +1,4 @@
-import type { DeterministicTradePlan, ManagerVerdict, SafetyBlocker, SignalSnapshot, SpecialistReport, TradeContext, TradePlan } from "../src/shared/types";
+import type { DeterministicTradePlan, ManagerVerdict, SafetyBlocker, SignalSnapshot, SpecialistReport, TradeContext, TradeExpressionResult, TradePlan } from "../src/shared/types";
 import type { AppConfig } from "./config";
 
 interface ResponsesApiResult {
@@ -18,7 +18,7 @@ export class OpenAiTradePlanner {
     return Boolean(this.config.openAiApiKey);
   }
 
-  async createTradePlan(snapshot: SignalSnapshot, context: TradeContext, userNotes?: string, quantitativePlan?: DeterministicTradePlan): Promise<TradePlan> {
+  async createTradePlan(snapshot: SignalSnapshot, context: TradeContext, userNotes?: string, quantitativePlan?: DeterministicTradePlan, tradeExpressionResult?: TradeExpressionResult): Promise<TradePlan> {
     if (!this.config.openAiApiKey) {
       throw new Error("OpenAI API key is not configured.");
     }
@@ -35,14 +35,15 @@ export class OpenAiTradePlanner {
           {
             role: "system",
             content:
-              "You are a conservative swing-trading research assistant for a beginner. You do not provide financial advice or guarantees. Explain the provided deterministic quantitative plan; do not invent different entry, stop, target, sizing, action, or bias. Use the provided technical, earnings, news, filing, and fundamental context. Start with plain-English meaning and practical paper-trading guidance, then keep the technical thesis, risk, and checklist concise. Clearly distinguish avoid, watch, paper long candidate, paper short candidate, and options research only. Never recommend live-money execution."
+              "You are a conservative swing-trading research assistant for a beginner. You do not provide financial advice or guarantees. Explain the provided deterministic quantitative plan and deterministic trade expression result; do not invent different entry, stop, target, sizing, option contracts, prices, max loss, action, or bias. Use the provided technical, earnings, news, filing, and fundamental context. Start with plain-English meaning and practical paper-trading guidance, then keep the technical thesis, risk, and checklist concise. Clearly distinguish avoid, watch, paper long candidate, paper short candidate, options paper candidate, and options research only. Never recommend live-money execution."
           },
           {
             role: "user",
             content: JSON.stringify({
-              task: "Create a structured paper-trade research explanation for this deterministic quantitative plan. Match the quantitative plan action, bias, entry zone, stop, targets, sizing, and warnings. If context conflicts with the quantitative plan, explain the conflict and choose watch or avoid.",
+              task: "Create a structured paper-trade research explanation for this deterministic quantitative plan and trade expression comparison. Match the quantitative plan action, bias, entry zone, stop, targets, sizing, and warnings. Explain the recommended expression and why alternatives were rejected, but do not override deterministic max loss, warnings, kill switch, or contract data.",
               snapshot: compactSnapshot(snapshot),
               quantitativePlan: quantitativePlan ? compactQuantPlan(quantitativePlan) : undefined,
+              tradeExpressionResult: tradeExpressionResult ? compactTradeExpressionResult(tradeExpressionResult) : undefined,
               context: compactContext(context),
               userNotes
             })
@@ -283,5 +284,49 @@ function compactQuantPlan(plan: DeterministicTradePlan) {
       warnings: plan.ranking.warnings,
       components: plan.ranking.components
     }
+  };
+}
+
+function compactTradeExpressionResult(result: TradeExpressionResult) {
+  return {
+    preference: result.preference,
+    thesis: result.thesis,
+    recommendedExpression: compactExpression(result.recommendedExpression),
+    alternatives: result.alternatives.slice(0, 5).map(compactExpression),
+    blockedExpressions: result.blockedExpressions.slice(0, 5).map((expression) => ({
+      expressionType: expression.expressionType,
+      statusReasons: expression.statusReasons
+    })),
+    riskWarnings: result.riskWarnings,
+    paperEligibility: result.paperEligibility
+  };
+}
+
+function compactExpression(expression: TradeExpressionResult["recommendedExpression"]) {
+  return {
+    expressionType: expression.expressionType,
+    direction: expression.direction,
+    status: expression.status,
+    statusReasons: expression.statusReasons,
+    maxLoss: expression.maxLoss,
+    maxProfit: expression.maxProfit,
+    breakeven: expression.breakeven,
+    requiredCapital: expression.requiredCapital,
+    riskReward: expression.riskReward,
+    dte: expression.dte,
+    liquidityWarnings: expression.liquidityWarnings,
+    volatilityWarnings: expression.volatilityWarnings,
+    earningsWarnings: expression.earningsWarnings,
+    assignmentWarnings: expression.assignmentWarnings,
+    legs: expression.multiLegOrder?.legs.map((leg) => ({
+      optionSymbol: leg.optionSymbol,
+      optionType: leg.optionType,
+      side: leg.side,
+      strike: leg.strike,
+      expiration: leg.expiration,
+      estimatedMid: leg.estimatedMid,
+      bid: leg.bid,
+      ask: leg.ask
+    }))
   };
 }

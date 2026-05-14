@@ -266,6 +266,201 @@ describe("API safety behavior", () => {
     expect(journal.body[0].notes).toMatch(/Broker order broker-order-1/);
   });
 
+  it("creates an internal options paper simulation without broker order submission", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const target = String(url);
+      if (target.includes("/v2/account")) {
+        return jsonResponse({
+          equity: "100000",
+          cash: "100000",
+          buying_power: "200000",
+          portfolio_value: "100000",
+          status: "ACTIVE",
+          currency: "USD"
+        });
+      }
+      if (target.includes("/v2/positions")) return jsonResponse([]);
+      if (target.includes("/v2/orders")) return jsonResponse([]);
+      if (target.includes("/v2/options/contracts")) {
+        return jsonResponse({
+          option_contracts: [{
+            symbol: "AAPL260619C00145000",
+            underlying_symbol: "AAPL",
+            type: "call",
+            expiration_date: "2026-06-19",
+            strike_price: "145",
+            close_price: "4.5",
+            bid_price: "4.4",
+            ask_price: "4.6",
+            open_interest: "250",
+            volume: "100"
+          }]
+        });
+      }
+      if (target.includes("/v2/stocks/AAPL/bars")) {
+        return jsonResponse({ bars: [{ t: "2026-05-14T00:00:00Z", o: 140, h: 142, l: 139, c: 140, v: 1000 }] });
+      }
+      return jsonResponse({});
+    });
+
+    const app = createApp({
+      alpacaKeyId: "key",
+      alpacaSecretKey: "secret",
+      databaseUrl: undefined,
+      dataFilePath: `data/test-options-paper-${Date.now()}.json`
+    });
+
+    const response = await request(app)
+      .post("/api/paper/multi-leg-orders")
+      .send({
+        expressionType: "long_call",
+        underlyingSymbol: "AAPL",
+        legs: [{
+          optionSymbol: "AAPL260619C00145000",
+          underlyingSymbol: "AAPL",
+          optionType: "call",
+          side: "buy",
+          quantity: 1,
+          strike: 145,
+          expiration: "2026-06-19",
+          estimatedMid: 4.5,
+          bid: 4.4,
+          ask: 4.6,
+          openInterest: 250,
+          volume: 100
+        }],
+        estimatedDebit: 450,
+        maxLoss: 450,
+        breakeven: 149.5,
+        requiredCapital: 450,
+        paperExecutionMode: "internal_simulation",
+        timeHorizon: "30-60 DTE swing options",
+        earningsChecked: true,
+        confirmedPaperOnly: true,
+        acceptedRisk: true,
+        maxLossAcknowledged: true,
+        paperSimulationAcknowledged: true,
+        noLiveEndpointAcknowledged: true
+      })
+      .expect(200);
+
+    expect(response.body.order.status).toBe("internally_simulated_paper");
+    expect(response.body.journalEntry).toMatchObject({
+      symbol: "AAPL",
+      status: "paper_open",
+      action: "paper_options_candidate",
+      expressionType: "long_call",
+      paperExecutionMode: "internal_simulation"
+    });
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/v2/orders"), expect.objectContaining({ method: "POST" }));
+  });
+
+  it("monitors and closes an internal options paper simulation without broker execution", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes("/v2/account")) {
+        return jsonResponse({
+          equity: "100000",
+          buying_power: "50000",
+          cash: "50000",
+          paper: true
+        });
+      }
+      if (target.includes("/v2/positions")) return jsonResponse([]);
+      if (target.includes("/v2/orders")) return jsonResponse([]);
+      if (target.includes("/v2/options/contracts")) {
+        return jsonResponse({
+          option_contracts: [{
+            symbol: "AAPL260619C00145000",
+            underlying_symbol: "AAPL",
+            type: "call",
+            expiration_date: "2026-06-19",
+            strike_price: "145",
+            close_price: "6",
+            bid_price: "5.9",
+            ask_price: "6.1",
+            open_interest: "250",
+            volume: "100"
+          }]
+        });
+      }
+      if (target.includes("/v2/stocks/AAPL/bars")) {
+        return jsonResponse({ bars: [{ t: "2026-05-14T00:00:00Z", o: 140, h: 142, l: 139, c: 140, v: 1000 }] });
+      }
+      return jsonResponse({});
+    });
+
+    const app = createApp({
+      alpacaKeyId: "key",
+      alpacaSecretKey: "secret",
+      databaseUrl: undefined,
+      dataFilePath: `data/test-options-sim-close-${Date.now()}.json`
+    });
+
+    const opened = await request(app)
+      .post("/api/paper/multi-leg-orders")
+      .send({
+        expressionType: "long_call",
+        underlyingSymbol: "AAPL",
+        legs: [{
+          optionSymbol: "AAPL260619C00145000",
+          underlyingSymbol: "AAPL",
+          optionType: "call",
+          side: "buy",
+          quantity: 1,
+          strike: 145,
+          expiration: "2026-06-19",
+          estimatedMid: 4.5,
+          bid: 4.4,
+          ask: 4.6,
+          openInterest: 250,
+          volume: 100
+        }],
+        estimatedDebit: 450,
+        maxLoss: 450,
+        breakeven: 149.5,
+        requiredCapital: 450,
+        paperExecutionMode: "internal_simulation",
+        timeHorizon: "30-60 DTE swing options",
+        earningsChecked: true,
+        confirmedPaperOnly: true,
+        acceptedRisk: true,
+        maxLossAcknowledged: true,
+        paperSimulationAcknowledged: true,
+        noLiveEndpointAcknowledged: true
+      })
+      .expect(200);
+
+    const snapshot = await request(app).get("/api/paper/options-simulations").expect(200);
+    expect(snapshot.body.positions[0]).toMatchObject({
+      id: opened.body.order.id,
+      underlyingSymbol: "AAPL",
+      currentValue: 600,
+      unrealizedPnL: 150
+    });
+
+    const closed = await request(app)
+      .post(`/api/paper/options-simulations/${opened.body.order.id}/close`)
+      .send({
+        confirm: "CLOSE OPTIONS SIMULATION",
+        exitReason: "target"
+      })
+      .expect(200);
+
+    expect(closed.body.result).toMatchObject({
+      status: "internally_simulated_paper_closed",
+      brokerSubmitted: false
+    });
+    expect(closed.body.journalEntry).toMatchObject({
+      status: "paper_closed",
+      exitReason: "target",
+      realizedPnL: 150,
+      actualRMultiple: 0.33
+    });
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/v2/positions/AAPL"), expect.objectContaining({ method: "DELETE" }));
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/v2/orders"), expect.objectContaining({ method: "POST" }));
+  });
+
   it("closes a single paper position after explicit confirmation", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
       const target = String(url);

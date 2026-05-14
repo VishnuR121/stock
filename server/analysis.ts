@@ -15,6 +15,7 @@ import type {
 } from "../src/shared/types";
 import { round } from "./indicators";
 import { enrichOptionIdeas, getCashSecuredPutMetrics, getCoveredCallMetrics, getDebitSpreadMetrics } from "./options";
+import { buildTradeExpressionResult } from "./tradeExpression";
 
 interface BuildAnalysisInput {
   mode: AnalysisMode;
@@ -33,6 +34,14 @@ export function buildAnalysisRun(input: BuildAnalysisInput): AnalysisRun {
   const specialistReports = buildSpecialistReports(input);
   const safetyBlockers = buildSafetyBlockers(input);
   const strategyCandidates = buildStrategyCandidates(input, safetyBlockers);
+  const tradeExpressionResult = buildTradeExpressionResult({
+    snapshot: input.snapshot,
+    currentHoldings: input.positions,
+    riskSettings: input.riskSettings,
+    account: input.account,
+    options: input.options,
+    earningsDate: input.context.earnings?.nextEarningsDate
+  });
   const managerVerdict = input.managerVerdict ?? buildFallbackManagerVerdict(input.snapshot, specialistReports, safetyBlockers);
 
   return {
@@ -46,6 +55,7 @@ export function buildAnalysisRun(input: BuildAnalysisInput): AnalysisRun {
     specialistReports,
     safetyBlockers,
     strategyCandidates,
+    tradeExpressionResult,
     managerVerdict
   };
 }
@@ -158,7 +168,7 @@ export function buildStrategyCandidates(input: BuildAnalysisInput, blockers = bu
   const rangeBound = snapshot.trend === "range" || snapshot.bias === "neutral";
   const riskReward = snapshot.riskReward ?? 0;
   const baseWarnings = hardBlock ? ["Hard safety blockers must be resolved before acting."] : [];
-  const executionWarning = "Research only: this app does not place options or short-sale orders yet.";
+  const executionWarning = "Research only: algo proposals do not auto-place options; manual paper confirmation and risk checks are required.";
 
   const candidates: StrategyCandidate[] = [
     {
@@ -197,7 +207,7 @@ export function buildStrategyCandidates(input: BuildAnalysisInput, blockers = bu
         "Requires borrow availability, margin approval, and separate stop logic."
       ],
       estimatedMaxLoss: null,
-      warnings: [...baseWarnings, executionWarning]
+      warnings: [...baseWarnings, "Short equity paper trades require a stop, max-loss estimate, and manual borrow/shortability review."]
     },
     {
       kind: "long_call",

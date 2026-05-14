@@ -12,26 +12,34 @@ import { buildSignalSnapshot, getDefaultRiskProfile } from "./indicators";
 import { buildMarketRegimeSnapshot } from "./marketRegime";
 import { buildOpportunityScan, dateKey } from "./opportunities";
 import { enrichOptionIdeas } from "./options";
+import { buildSimulatedOptionsSnapshot } from "./optionsSimulation";
 import { buildPositionMonitorSnapshot } from "./positionMonitor";
 import { createStore, getStoreDescription } from "./storeFactory";
 import { buildDeterministicTradePlan, constrainAiTradePlanToQuantPlan } from "./tradePlan";
+import { buildTradeExpressionResult } from "./tradeExpression";
 import type { AppStore } from "./storage";
-import { normalizeSymbol, paperOrderSchema, validatePaperOrder, watchlistItemSchema } from "./validation";
+import { multiLegPaperOrderSchema, normalizeSymbol, paperOrderSchema, validateMultiLegPaperOrder, validatePaperOrder, watchlistItemSchema } from "./validation";
 import type {
   EnrichedTradePlanResponse,
   AlgoTradeProposal,
+  AssetClass,
   BacktestRequest,
   HealthStatus,
   JournalExitReason,
   JournalSourceType,
   JournalStatus,
+  MarketRegimeLabel,
+  MultiLegPaperOrderRequest,
   PaperOrderRequest,
+  PaperExecutionMode,
   PaperOrderValidationResult,
   AnalysisMode,
   RiskSettings,
   SignalSnapshot,
   TradeAction,
   TradeContext,
+  TradeExpressionType,
+  TradeExpressionPreference,
   TradeJournalEntry,
   TradingViewSignal,
   WatchlistItem
@@ -265,6 +273,37 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
     response.json({ symbol, ideas: enriched, cached: false });
   }));
 
+  app.post("/api/trade-expressions", asyncHandler(async (request, response) => {
+    const snapshot = request.body?.snapshot as SignalSnapshot | undefined;
+    if (!snapshot?.symbol || !Array.isArray(snapshot.bars)) {
+      response.status(400).json({ error: "A SignalSnapshot with recent bars is required." });
+      return;
+    }
+
+    const symbol = normalizeSymbol(snapshot.symbol);
+    const preference = normalizeTradeExpressionPreference(request.body?.preference);
+    const requestOptions = Array.isArray(request.body?.options) ? request.body.options : undefined;
+    const [riskSettings, account, positionsResponse, marketRegime, context, options] = await Promise.all([
+      store.getRiskSettings(),
+      safeAccount(alpaca),
+      safePositions(alpaca),
+      getMarketRegimeSnapshot(alpaca).catch(() => null),
+      getContextForSymbol(store, tradeContext, symbol).catch(() => undefined),
+      requestOptions ? Promise.resolve(requestOptions) : getOptionsForExpression(store, alpaca, symbol)
+    ]);
+
+    response.json(buildTradeExpressionResult({
+      snapshot: { ...snapshot, symbol },
+      marketRegime,
+      currentHoldings: positionsResponse.positions,
+      riskSettings,
+      account,
+      options,
+      earningsDate: context?.earnings?.nextEarningsDate,
+      preference
+    }));
+  }));
+
   app.get("/api/context/:symbol", asyncHandler(async (request, response) => {
     const symbol = normalizeSymbol(request.params.symbol);
     response.json(await getContextForSymbol(store, tradeContext, symbol));
@@ -291,13 +330,25 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       return;
     }
 
-    const [context, riskSettings, marketRegime] = await Promise.all([
+    const [context, riskSettings, marketRegime, account, positionsResponse, options] = await Promise.all([
       getContextForSymbol(store, tradeContext, snapshot.symbol),
       store.getRiskSettings(),
-      getMarketRegimeSnapshot(alpaca).catch(() => null)
+      getMarketRegimeSnapshot(alpaca).catch(() => null),
+      safeAccount(alpaca),
+      safePositions(alpaca),
+      getOptionsForExpression(store, alpaca, snapshot.symbol)
     ]);
     const quantitativePlan = buildDeterministicTradePlan({ snapshot, riskSettings, marketRegime });
-    const aiPlan = await tradePlanner.createTradePlan(snapshot, context, request.body?.notes, quantitativePlan);
+    const tradeExpressionResult = buildTradeExpressionResult({
+      snapshot,
+      marketRegime,
+      currentHoldings: positionsResponse.positions,
+      riskSettings,
+      account,
+      options,
+      earningsDate: context.earnings?.nextEarningsDate
+    });
+    const aiPlan = await tradePlanner.createTradePlan(snapshot, context, request.body?.notes, quantitativePlan, tradeExpressionResult);
     const plan = constrainAiTradePlanToQuantPlan(aiPlan, quantitativePlan);
     const savedPlan = await store.saveTradePlan({
       symbol: snapshot.symbol,
@@ -306,7 +357,7 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       plan,
       context
     });
-    const enriched: EnrichedTradePlanResponse = { plan, context, savedPlan, quantitativePlan };
+    const enriched: EnrichedTradePlanResponse = { plan, context, savedPlan, quantitativePlan, tradeExpressionResult };
     response.json(enriched);
   }));
 
@@ -437,7 +488,17 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       notes: `Placed from Algo Command Center proposal: ${proposal.strategyTitle}.`,
       entryPrice,
       stopLossPrice: proposal.order?.stopLossPrice,
-      takeProfitPrice: proposal.order?.takeProfitPrice
+      takeProfitPrice: proposal.order?.takeProfitPrice,
+      outcome: "open",
+      expressionType: proposal.order?.side === "sell" ? "short_equity" : "long_equity",
+      underlyingSymbol: proposal.symbol,
+      assetClass: "equity",
+      maxLoss: validation?.estimatedRisk ?? undefined,
+      requiredCapital: validation?.estimatedNotional ?? undefined,
+      paperExecutionMode: "broker_paper",
+      brokerOrderIds: getBrokerOrderId(brokerOrder) ? [getBrokerOrderId(brokerOrder) as string] : [],
+      strategyWarnings: validation?.warnings,
+      strategyCategory: proposal.order?.side === "sell" ? "short_equity" : "long_equity"
     });
     response.json({ proposal: updated, validation, order: brokerOrder });
   }));
@@ -475,6 +536,12 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       maxDataAgeMinutes: optionalNumber(request.body?.maxDataAgeMinutes) ?? current.maxDataAgeMinutes,
       priceCollarPct: optionalNumber(request.body?.priceCollarPct) ?? current.priceCollarPct,
       earningsWindowDays: optionalNumber(request.body?.earningsWindowDays) ?? current.earningsWindowDays,
+      maxOpenPositions: optionalNumber(request.body?.maxOpenPositions) ?? current.maxOpenPositions,
+      maxOptionsContracts: optionalNumber(request.body?.maxOptionsContracts) ?? current.maxOptionsContracts,
+      maxStrategyExposurePct: optionalNumber(request.body?.maxStrategyExposurePct) ?? current.maxStrategyExposurePct,
+      allowZeroDte: typeof request.body?.allowZeroDte === "boolean"
+        ? request.body.allowZeroDte
+        : current.allowZeroDte,
       killSwitchEnabled: typeof request.body?.killSwitchEnabled === "boolean"
         ? request.body.killSwitchEnabled
         : current.killSwitchEnabled
@@ -540,7 +607,27 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       stopLossPrice: optionalNumber(request.body?.stopLossPrice),
       takeProfitPrice: optionalNumber(request.body?.takeProfitPrice),
       outcome: request.body?.outcome,
-      pnl: optionalNumber(request.body?.pnl)
+      pnl: optionalNumber(request.body?.pnl),
+      expressionType: normalizeExpressionType(request.body?.expressionType),
+      underlyingSymbol: optionalString(request.body?.underlyingSymbol),
+      assetClass: normalizeAssetClass(request.body?.assetClass),
+      optionLegs: Array.isArray(request.body?.optionLegs) ? request.body.optionLegs : undefined,
+      maxLoss: optionalNumber(request.body?.maxLoss),
+      maxProfit: optionalNumber(request.body?.maxProfit),
+      breakeven: optionalNumber(request.body?.breakeven),
+      requiredCapital: optionalNumber(request.body?.requiredCapital),
+      entryThesis: optionalString(request.body?.entryThesis),
+      exitThesis: optionalString(request.body?.exitThesis),
+      entryMarketRegime: normalizeMarketRegime(request.body?.entryMarketRegime),
+      entryScore: optionalNumber(request.body?.entryScore),
+      aiConfidence: normalizeAiConfidence(request.body?.aiConfidence),
+      paperExecutionMode: normalizePaperExecutionMode(request.body?.paperExecutionMode),
+      brokerOrderIds: Array.isArray(request.body?.brokerOrderIds) ? request.body.brokerOrderIds.filter((id: unknown) => typeof id === "string") : undefined,
+      optionsMetadata: isPlainRecord(request.body?.optionsMetadata) ? request.body.optionsMetadata : undefined,
+      strategyWarnings: Array.isArray(request.body?.strategyWarnings) ? request.body.strategyWarnings.filter((warning: unknown) => typeof warning === "string") : undefined,
+      realizedPnL: optionalNumber(request.body?.realizedPnL),
+      actualRMultiple: optionalNumber(request.body?.actualRMultiple),
+      strategyCategory: optionalString(request.body?.strategyCategory)
     });
     response.json(entry);
   }));
@@ -569,6 +656,12 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       store.getAlgoTradeProposals(100)
     ]);
     response.json(buildPositionMonitorSnapshot({ positions, openOrders: orders, proposals }));
+  }));
+
+  app.get("/api/paper/options-simulations", asyncHandler(async (_request, response) => {
+    const journal = await store.getJournal();
+    const optionsByUnderlying = await getOptionsByUnderlyingForOpenSimulations(store, alpaca, journal);
+    response.json(buildSimulatedOptionsSnapshot({ journal, optionsByUnderlying }));
   }));
 
   app.post("/api/alpaca/paper-orders", asyncHandler(async (request, response) => {
@@ -620,9 +713,182 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       entryPrice: referencePrice ?? undefined,
       stopLossPrice: orderInput.stopLossPrice,
       takeProfitPrice: orderInput.takeProfitPrice,
-      outcome: "open"
+      outcome: "open",
+      expressionType: orderInput.side === "sell" ? "short_equity" : "long_equity",
+      underlyingSymbol: orderInput.symbol,
+      assetClass: "equity",
+      maxLoss: validation.estimatedRisk ?? undefined,
+      requiredCapital: validation.estimatedNotional ?? undefined,
+      paperExecutionMode: "broker_paper",
+      brokerOrderIds: getBrokerOrderId(result) ? [getBrokerOrderId(result) as string] : [],
+      strategyWarnings: validation.warnings,
+      strategyCategory: orderInput.side === "sell" ? "short_equity" : "long_equity"
     });
     response.json({ validation, order: result, journalEntry });
+  }));
+
+  app.post("/api/paper/multi-leg-orders", asyncHandler(async (request, response) => {
+    const parsed = multiLegPaperOrderSchema.safeParse(request.body);
+    if (!parsed.success) {
+      response.status(400).json({
+        ok: false,
+        errors: parsed.error.issues.map((issue) => issue.message),
+        warnings: [],
+        estimatedNotional: null,
+        estimatedRisk: null
+      });
+      return;
+    }
+
+    const riskSettings = await store.getRiskSettings();
+    if (riskSettings.killSwitchEnabled) {
+      response.status(423).json({
+        ok: false,
+        errors: ["Paper order entry is disabled because the kill switch is enabled."],
+        warnings: [],
+        estimatedNotional: null,
+        estimatedRisk: null
+      });
+      return;
+    }
+
+    const alpacaPaperOnly = isPaperAlpacaUrl(config.alpacaPaperBaseUrl);
+    if (!alpacaPaperOnly) {
+      response.status(400).json({
+        ok: false,
+        errors: ["Live Alpaca endpoints are blocked. Use the paper endpoint before paper options simulation."],
+        warnings: [],
+        estimatedNotional: null,
+        estimatedRisk: null
+      });
+      return;
+    }
+
+    const [account, positionsResponse] = await Promise.all([alpaca.getAccount(), safePositions(alpaca)]);
+    const riskProfile = getRiskProfile(account.equity ?? 100000, riskSettings);
+    if (parsed.data.expressionType === "covered_call" && getHeldLongShares(positionsResponse.positions, parsed.data.underlyingSymbol) < 100) {
+      response.status(400).json({
+        ok: false,
+        errors: ["Covered calls require at least 100 long shares of the underlying."],
+        warnings: [],
+        estimatedNotional: null,
+        estimatedRisk: null
+      });
+      return;
+    }
+    const knownContracts = await getOptionsForExpression(store, alpaca, parsed.data.underlyingSymbol);
+    const missingContracts = knownContracts.length
+      ? parsed.data.legs
+        .map((leg) => leg.optionSymbol)
+        .filter((symbol) => !knownContracts.some((contract) => contract.symbol === symbol))
+      : [];
+    if (missingContracts.length) {
+      response.status(400).json({
+        ok: false,
+        errors: [`Option contract validation failed for: ${missingContracts.join(", ")}.`],
+        warnings: [],
+        estimatedNotional: null,
+        estimatedRisk: null
+      });
+      return;
+    }
+    const validation = validateMultiLegPaperOrder(parsed.data, riskProfile, riskSettings, {
+      buyingPower: account.buyingPower ?? account.cash ?? account.equity,
+      alpacaPaperOnly
+    });
+    if (!knownContracts.length) {
+      validation.warnings.push("Provider contract validation was unavailable; verify the contracts manually before relying on the simulation.");
+    }
+
+    if (!validation.ok || !validation.order) {
+      response.status(400).json(validation);
+      return;
+    }
+
+    const simulatedOrder = {
+      id: `sim-options-${validation.order.underlyingSymbol}-${Date.now()}`,
+      status: "internally_simulated_paper",
+      paperExecutionMode: validation.order.paperExecutionMode,
+      expressionType: validation.order.expressionType,
+      legs: validation.order.legs
+    };
+    const journalEntry = await store.addJournalEntry({
+      symbol: validation.order.underlyingSymbol,
+      planId: validation.order.sourcePlanId,
+      signalAsOf: validation.order.sourceSignalAsOf,
+      sourceType: "paper_order",
+      sourceId: validation.order.sourceExpressionId ?? validation.order.sourceAnalysisId ?? validation.order.sourcePlanId,
+      followedPlan: validation.order.followedPlan,
+      status: "paper_open",
+      action: "paper_options_candidate",
+      notes: getMultiLegPaperOrderJournalNotes(validation.order),
+      outcome: "open",
+      expressionType: validation.order.expressionType,
+      underlyingSymbol: validation.order.underlyingSymbol,
+      assetClass: validation.order.legs.length > 1 ? "multi_leg_option" : "option",
+      optionLegs: validation.order.legs,
+      maxLoss: validation.order.maxLoss,
+      maxProfit: validation.order.maxProfit,
+      breakeven: validation.order.breakeven,
+      requiredCapital: validation.order.requiredCapital,
+      paperExecutionMode: validation.order.paperExecutionMode,
+      brokerOrderIds: [],
+      optionsMetadata: {
+        estimatedDebit: validation.order.estimatedDebit,
+        estimatedCredit: validation.order.estimatedCredit,
+        simulatedOrderId: simulatedOrder.id
+      },
+      strategyWarnings: validation.warnings,
+      strategyCategory: validation.order.expressionType
+    });
+    response.json({ validation, order: simulatedOrder, journalEntry });
+  }));
+
+  app.post("/api/paper/options-simulations/:id/close", asyncHandler(async (request, response) => {
+    if (request.body?.confirm !== "CLOSE OPTIONS SIMULATION") {
+      response.status(400).json({ error: "Type CLOSE OPTIONS SIMULATION to close this internal paper options simulation." });
+      return;
+    }
+
+    const journal = await store.getJournal();
+    const optionsByUnderlying = await getOptionsByUnderlyingForOpenSimulations(store, alpaca, journal);
+    const snapshot = buildSimulatedOptionsSnapshot({ journal, optionsByUnderlying });
+    const requestedId = String(request.params.id ?? "");
+    const position = snapshot.positions.find((item) => item.id === requestedId || item.journalEntryId === requestedId);
+    if (!position) {
+      response.status(404).json({ error: "Open options simulation not found." });
+      return;
+    }
+
+    const pnl = optionalNumber(request.body?.pnl) ?? position.unrealizedPnL;
+    const exitValue = optionalNumber(request.body?.exitValue) ?? position.currentValue;
+    const exitReason = normalizeJournalExitReason(request.body?.exitReason) ?? "manual";
+    const outcome: "win" | "loss" | "breakeven" = pnl > 0 ? "win" : pnl < 0 ? "loss" : "breakeven";
+    const maxLoss = position.maxLoss;
+    const actualRMultiple = typeof maxLoss === "number" && maxLoss > 0 ? Math.round((pnl / maxLoss) * 100) / 100 : undefined;
+    const journalEntry = await store.updateJournalEntry(position.journalEntryId, {
+      status: "paper_closed",
+      action: "paper_options_candidate",
+      notes: String(request.body?.notes ?? `Closed internal options simulation. ${position.suggestedAction}`),
+      exitReason,
+      exitPrice: exitValue,
+      pnl,
+      outcome,
+      realizedPnL: pnl,
+      actualRMultiple,
+      exitThesis: optionalString(request.body?.exitThesis) ?? position.exitReasons[0]
+    });
+
+    response.json({
+      result: {
+        id: position.id,
+        status: "internally_simulated_paper_closed",
+        paperExecutionMode: "internal_simulation",
+        brokerSubmitted: false
+      },
+      position,
+      journalEntry
+    });
   }));
 
   app.post("/api/alpaca/paper-orders/cancel-open", asyncHandler(async (_request, response) => {
@@ -653,7 +919,8 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       exitReason,
       exitPrice,
       pnl,
-      outcome
+      outcome,
+      realizedPnL: pnl
     };
     const openEntry = (await store.getJournal()).find((entry) => entry.symbol === normalizeSymbol(symbol) && entry.status === "paper_open");
     const journalEntry = openEntry
@@ -682,12 +949,12 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
 }
 
 function normalizeAction(value: unknown): TradeAction {
-  const allowed: TradeAction[] = ["avoid", "watch", "paper_long_candidate", "paper_short_candidate", "options_research_only"];
+  const allowed: TradeAction[] = ["avoid", "watch", "paper_long_candidate", "paper_short_candidate", "paper_options_candidate", "options_research_only"];
   return allowed.includes(value as TradeAction) ? (value as TradeAction) : "watch";
 }
 
 function normalizeOptionalAction(value: unknown): TradeAction | undefined {
-  const allowed: TradeAction[] = ["avoid", "watch", "paper_long_candidate", "paper_short_candidate", "options_research_only"];
+  const allowed: TradeAction[] = ["avoid", "watch", "paper_long_candidate", "paper_short_candidate", "paper_options_candidate", "options_research_only"];
   return allowed.includes(value as TradeAction) ? (value as TradeAction) : undefined;
 }
 
@@ -712,6 +979,26 @@ function normalizeJournalPatch(body: unknown): Partial<Omit<TradeJournalEntry, "
   if (hasOwn(input, "stopLossPrice")) patch.stopLossPrice = optionalNumber(input.stopLossPrice);
   if (hasOwn(input, "takeProfitPrice")) patch.takeProfitPrice = optionalNumber(input.takeProfitPrice);
   if (hasOwn(input, "pnl")) patch.pnl = optionalNumber(input.pnl);
+  if (hasOwn(input, "expressionType")) patch.expressionType = normalizeExpressionType(input.expressionType);
+  if (hasOwn(input, "underlyingSymbol")) patch.underlyingSymbol = optionalString(input.underlyingSymbol);
+  if (hasOwn(input, "assetClass")) patch.assetClass = normalizeAssetClass(input.assetClass);
+  if (hasOwn(input, "optionLegs")) patch.optionLegs = Array.isArray(input.optionLegs) ? input.optionLegs as TradeJournalEntry["optionLegs"] : undefined;
+  if (hasOwn(input, "maxLoss")) patch.maxLoss = optionalNumber(input.maxLoss);
+  if (hasOwn(input, "maxProfit")) patch.maxProfit = optionalNumber(input.maxProfit);
+  if (hasOwn(input, "breakeven")) patch.breakeven = optionalNumber(input.breakeven);
+  if (hasOwn(input, "requiredCapital")) patch.requiredCapital = optionalNumber(input.requiredCapital);
+  if (hasOwn(input, "entryThesis")) patch.entryThesis = optionalString(input.entryThesis);
+  if (hasOwn(input, "exitThesis")) patch.exitThesis = optionalString(input.exitThesis);
+  if (hasOwn(input, "entryMarketRegime")) patch.entryMarketRegime = normalizeMarketRegime(input.entryMarketRegime);
+  if (hasOwn(input, "entryScore")) patch.entryScore = optionalNumber(input.entryScore);
+  if (hasOwn(input, "aiConfidence")) patch.aiConfidence = normalizeAiConfidence(input.aiConfidence);
+  if (hasOwn(input, "paperExecutionMode")) patch.paperExecutionMode = normalizePaperExecutionMode(input.paperExecutionMode);
+  if (hasOwn(input, "brokerOrderIds")) patch.brokerOrderIds = Array.isArray(input.brokerOrderIds) ? input.brokerOrderIds.filter((id) => typeof id === "string") as string[] : undefined;
+  if (hasOwn(input, "optionsMetadata")) patch.optionsMetadata = isPlainRecord(input.optionsMetadata) ? input.optionsMetadata : undefined;
+  if (hasOwn(input, "strategyWarnings")) patch.strategyWarnings = Array.isArray(input.strategyWarnings) ? input.strategyWarnings.filter((warning) => typeof warning === "string") as string[] : undefined;
+  if (hasOwn(input, "realizedPnL")) patch.realizedPnL = optionalNumber(input.realizedPnL);
+  if (hasOwn(input, "actualRMultiple")) patch.actualRMultiple = optionalNumber(input.actualRMultiple);
+  if (hasOwn(input, "strategyCategory")) patch.strategyCategory = optionalString(input.strategyCategory);
 
   return patch;
 }
@@ -741,6 +1028,51 @@ function normalizeOutcome(value: unknown): TradeJournalEntry["outcome"] | undefi
   return allowed.includes(value as NonNullable<TradeJournalEntry["outcome"]>)
     ? (value as NonNullable<TradeJournalEntry["outcome"]>)
     : undefined;
+}
+
+function normalizeExpressionType(value: unknown): TradeExpressionType | undefined {
+  const allowed: TradeExpressionType[] = [
+    "long_equity",
+    "short_equity",
+    "long_call",
+    "long_put",
+    "covered_call",
+    "cash_secured_put",
+    "bull_call_debit_spread",
+    "bear_put_debit_spread",
+    "credit_spread_research",
+    "iron_condor_research",
+    "no_trade"
+  ];
+  return allowed.includes(value as TradeExpressionType) ? (value as TradeExpressionType) : undefined;
+}
+
+function normalizeAssetClass(value: unknown): AssetClass | undefined {
+  const allowed: AssetClass[] = ["equity", "option", "multi_leg_option"];
+  return allowed.includes(value as AssetClass) ? (value as AssetClass) : undefined;
+}
+
+function normalizePaperExecutionMode(value: unknown): PaperExecutionMode | undefined {
+  const allowed: PaperExecutionMode[] = ["broker_paper", "internal_simulation", "research_only"];
+  return allowed.includes(value as PaperExecutionMode) ? (value as PaperExecutionMode) : undefined;
+}
+
+function normalizeMarketRegime(value: unknown): MarketRegimeLabel | undefined {
+  const allowed: MarketRegimeLabel[] = ["bullish", "neutral", "bearish", "caution"];
+  return allowed.includes(value as MarketRegimeLabel) ? (value as MarketRegimeLabel) : undefined;
+}
+
+function normalizeAiConfidence(value: unknown): "low" | "medium" | "high" | undefined {
+  return value === "low" || value === "medium" || value === "high" ? value : undefined;
+}
+
+function normalizeTradeExpressionPreference(value: unknown): TradeExpressionPreference | undefined {
+  const allowed: TradeExpressionPreference[] = ["simple", "defined_risk", "income", "leverage", "capital_efficient"];
+  return allowed.includes(value as TradeExpressionPreference) ? (value as TradeExpressionPreference) : undefined;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function hasOwn(input: Record<string, unknown>, key: string): boolean {
@@ -836,6 +1168,18 @@ async function safePositions(alpaca: AlpacaClient): Promise<{ positions: unknown
   }
 }
 
+function getHeldLongShares(positions: unknown[], symbol: string): number {
+  return positions.reduce<number>((sum, position) => {
+    if (!position || typeof position !== "object") return sum;
+    const rawSymbol = (position as { symbol?: unknown }).symbol;
+    if (typeof rawSymbol !== "string" || rawSymbol.toUpperCase() !== symbol.toUpperCase()) return sum;
+    const side = String((position as { side?: unknown }).side ?? "long").toLowerCase();
+    if (side === "short") return sum;
+    const qty = Number((position as { qty?: unknown; quantity?: unknown }).qty ?? (position as { quantity?: unknown }).quantity ?? 0);
+    return Number.isFinite(qty) && qty > 0 ? sum + qty : sum;
+  }, 0);
+}
+
 async function getMarketSnapshots(alpaca: AlpacaClient, store: AppStore): Promise<SignalSnapshot[]> {
   const account = await safeAccount(alpaca);
   const riskSettings = await store.getRiskSettings();
@@ -880,6 +1224,19 @@ function getPaperOrderJournalNotes(order: PaperOrderRequest, brokerOrder: unknow
   }
   const brokerId = getBrokerOrderId(brokerOrder);
   if (brokerId) pieces.push(`Broker order ${brokerId}.`);
+  return pieces.join(" ");
+}
+
+function getMultiLegPaperOrderJournalNotes(order: MultiLegPaperOrderRequest): string {
+  const pieces = [
+    "Options paper trade created as an internal simulation.",
+    "No live options order or broker options order was submitted.",
+    `${order.expressionType.replaceAll("_", " ")} with ${order.legs.length} leg${order.legs.length === 1 ? "" : "s"}.`,
+    `Max loss acknowledged: ${order.maxLoss}.`
+  ];
+  if (order.estimatedDebit !== undefined) pieces.push(`Estimated debit ${order.estimatedDebit}.`);
+  if (order.estimatedCredit !== undefined) pieces.push(`Estimated credit ${order.estimatedCredit}.`);
+  if (order.sourceExpressionId) pieces.push(`Source expression ${order.sourceExpressionId}.`);
   return pieces.join(" ");
 }
 
@@ -932,4 +1289,37 @@ async function getContextForSymbol(
   const context = await tradeContext.build(symbol);
   await store.saveContext(symbol, context);
   return context;
+}
+
+async function getOptionsForExpression(store: AppStore, alpaca: AlpacaClient, symbol: string) {
+  const cached = await store.getCachedOptionIdeas(symbol, OPTIONS_CACHE_MS);
+  if (cached) return cached;
+  try {
+    const [ideas, bars] = await Promise.all([
+      alpaca.getOptionIdeas(symbol),
+      alpaca.getBars(symbol, 5).catch(() => [])
+    ]);
+    const enriched = enrichOptionIdeas(ideas, bars.at(-1)?.close ?? null);
+    await store.saveOptionIdeas(symbol, enriched);
+    return enriched;
+  } catch {
+    return [];
+  }
+}
+
+async function getOptionsByUnderlyingForOpenSimulations(
+  store: AppStore,
+  alpaca: AlpacaClient,
+  journal: TradeJournalEntry[]
+) {
+  const underlyings = [...new Set(journal
+    .filter((entry) => entry.status === "paper_open" && entry.paperExecutionMode === "internal_simulation" && entry.optionLegs?.length)
+    .map((entry) => normalizeSymbol(entry.underlyingSymbol ?? entry.symbol))
+    .filter(Boolean)
+  )];
+  const entries = await Promise.all(underlyings.map(async (symbol) => [
+    symbol,
+    await getOptionsForExpression(store, alpaca, symbol)
+  ] as const));
+  return Object.fromEntries(entries);
 }

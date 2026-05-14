@@ -81,7 +81,11 @@ export function getDefaultRiskSettings(): RiskSettings {
     maxDataAgeMinutes: 60 * 24 * 3,
     priceCollarPct: 0.03,
     earningsWindowDays: 7,
-    killSwitchEnabled: false
+    killSwitchEnabled: false,
+    maxOpenPositions: 12,
+    maxOptionsContracts: 4,
+    maxStrategyExposurePct: 0.1,
+    allowZeroDte: false
   };
 }
 

@@ -8,6 +8,10 @@ interface RawAlpacaOptionContract {
   expiration_date: string;
   strike_price: string;
   close_price?: string | null;
+  bid_price?: string | null;
+  ask_price?: string | null;
+  last_price?: string | null;
+  volume?: string | null;
   open_interest?: string | null;
 }
 
@@ -15,9 +19,16 @@ export function mapOptionContractsToIdeas(contracts: RawAlpacaOptionContract[]):
   return contracts
     .map((contract) => {
       const strike = Number(contract.strike_price);
-      const close = contract.close_price ? Number(contract.close_price) : null;
-      const openInterest = contract.open_interest ? Number(contract.open_interest) : null;
-      const premium = close && close > 0 ? close : null;
+      const close = toPositiveNumber(contract.close_price);
+      const bid = toPositiveNumber(contract.bid_price);
+      const ask = toPositiveNumber(contract.ask_price);
+      const last = toPositiveNumber(contract.last_price);
+      const mid = bid !== null && ask !== null && ask >= bid ? round((bid + ask) / 2, 2) : null;
+      const volume = toNumberOrNull(contract.volume);
+      const openInterest = toNumberOrNull(contract.open_interest);
+      const premium = close ?? last ?? mid;
+      const spreadWidthPct = getSpreadWidthPct(bid, ask, mid);
+      const liquidityScore = getLiquidityScore({ openInterest, volume, spreadWidthPct, premium });
       const breakeven = premium
         ? contract.type === "call"
           ? round(strike + premium, 2)
@@ -32,10 +43,17 @@ export function mapOptionContractsToIdeas(contracts: RawAlpacaOptionContract[]):
         expirationDate: contract.expiration_date,
         strikePrice: strike,
         closePrice: premium,
+        bidPrice: bid,
+        askPrice: ask,
+        midPrice: mid,
+        lastPrice: last,
+        volume,
         openInterest,
         breakeven,
         maxLoss,
-        liquidityWarning: getLiquidityWarning(openInterest, premium)
+        spreadWidthPct,
+        liquidityScore,
+        liquidityWarning: getLiquidityWarning({ openInterest, volume, premium, spreadWidthPct })
       };
     })
     .filter((idea) => Number.isFinite(idea.strikePrice))
@@ -81,6 +99,33 @@ export function enrichOptionIdea(option: OptionIdea, underlyingPrice: number, no
     probabilityOfProfit: getProbabilityOfProfit(option.type, underlyingPrice, option.breakeven, impliedVolatility, yearsToExpiration),
     ...greeks
   };
+}
+
+export function filterOptionIdeas(
+  options: OptionIdea[],
+  filters: {
+    type?: "call" | "put";
+    minDte?: number;
+    maxDte?: number;
+    minStrike?: number;
+    maxStrike?: number;
+    requirePrice?: boolean;
+  }
+): OptionIdea[] {
+  return options.filter((option) => {
+    if (filters.type && option.type !== filters.type) return false;
+    if (typeof filters.minDte === "number" && (option.daysToExpiration ?? 0) < filters.minDte) return false;
+    if (typeof filters.maxDte === "number" && (option.daysToExpiration ?? 0) > filters.maxDte) return false;
+    if (typeof filters.minStrike === "number" && option.strikePrice < filters.minStrike) return false;
+    if (typeof filters.maxStrike === "number" && option.strikePrice > filters.maxStrike) return false;
+    if (filters.requirePrice && getOptionPrice(option) === null) return false;
+    return true;
+  });
+}
+
+export function getOptionPrice(option?: OptionIdea): number | null {
+  if (!option) return null;
+  return option.midPrice ?? option.lastPrice ?? option.closePrice ?? null;
 }
 
 export function getDebitSpreadMetrics(input: {
@@ -143,17 +188,65 @@ export function getCashSecuredPutMetrics(put?: OptionIdea) {
   };
 }
 
-function getLiquidityWarning(openInterest: number | null, premium: number | null): string | null {
-  if (premium === null) return "No recent close price available.";
-  if (openInterest === null) return "Open interest unavailable.";
-  if (openInterest < 100) return "Low open interest.";
+function getLiquidityWarning(input: {
+  openInterest: number | null;
+  volume: number | null;
+  premium: number | null;
+  spreadWidthPct: number | null;
+}): string | null {
+  if (input.premium === null) return "No recent option price available.";
+  if (input.spreadWidthPct !== null && input.spreadWidthPct > 0.2) return "Wide bid/ask spread.";
+  if (input.openInterest === null) return "Open interest unavailable.";
+  if (input.openInterest < 100) return "Low open interest.";
+  if (input.volume !== null && input.volume < 10) return "Low option volume.";
   return null;
 }
 
-function getDaysToExpiration(expirationDate: string, now: Date): number {
+export function getDaysToExpiration(expirationDate: string, now: Date): number {
   const expiration = new Date(`${expirationDate}T21:00:00Z`);
   const days = Math.ceil((expiration.getTime() - now.getTime()) / 86400000);
   return Number.isFinite(days) ? Math.max(0, days) : 0;
+}
+
+function toPositiveNumber(value?: string | null): number | null {
+  const parsed = toNumberOrNull(value);
+  return parsed !== null && parsed > 0 ? parsed : null;
+}
+
+function toNumberOrNull(value?: string | null): number | null {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getSpreadWidthPct(bid: number | null, ask: number | null, mid: number | null): number | null {
+  if (bid === null || ask === null || mid === null || mid <= 0 || ask < bid) return null;
+  return round((ask - bid) / mid, 4);
+}
+
+function getLiquidityScore(input: {
+  openInterest: number | null;
+  volume: number | null;
+  spreadWidthPct: number | null;
+  premium: number | null;
+}): number | null {
+  if (input.premium === null) return null;
+  let score = 55;
+  if ((input.openInterest ?? 0) >= 500) score += 22;
+  else if ((input.openInterest ?? 0) >= 100) score += 12;
+  else score -= 20;
+
+  if (input.volume !== null) {
+    if (input.volume >= 100) score += 12;
+    else if (input.volume < 10) score -= 10;
+  }
+
+  if (input.spreadWidthPct !== null) {
+    if (input.spreadWidthPct <= 0.08) score += 12;
+    else if (input.spreadWidthPct > 0.2) score -= 22;
+  }
+
+  return Math.max(0, Math.min(100, Math.round(score)));
 }
 
 function getIntrinsicValue(type: "call" | "put", underlyingPrice: number, strikePrice: number): number {

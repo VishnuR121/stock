@@ -33,6 +33,7 @@ import type {
   JournalExitReason,
   MarketRegimeLabel,
   MarketRegimeSnapshot,
+  MultiLegPaperOrderRequest,
   OpportunityCandidate,
   OpportunityScan,
   OptionIdea,
@@ -42,9 +43,14 @@ import type {
   RiskSettings,
   SavedTradePlan,
   SignalSnapshot,
+  SimulatedOptionsPosition,
+  SimulatedOptionsSnapshot,
   TradeAction,
   TradeHorizon,
   TradeContext,
+  TradeExpression,
+  TradeExpressionPreference,
+  TradeExpressionResult,
   TradeJournalEntry,
   TradePlan,
   WatchlistItem
@@ -135,13 +141,16 @@ export function App() {
   const [opportunityScan, setOpportunityScan] = useState<OpportunityScan | null>(null);
   const [algoProposals, setAlgoProposals] = useState<AlgoTradeProposal[]>([]);
   const [positionMonitor, setPositionMonitor] = useState<PositionMonitorSnapshot | null>(null);
+  const [optionsSimulation, setOptionsSimulation] = useState<SimulatedOptionsSnapshot | null>(null);
   const [optionsBySymbol, setOptionsBySymbol] = useState<Record<string, OptionIdea[]>>({});
+  const [tradeExpressionsBySymbol, setTradeExpressionsBySymbol] = useState<Record<string, TradeExpressionResult>>({});
   const [contextsBySymbol, setContextsBySymbol] = useState<Record<string, TradeContext>>({});
   const [account, setAccount] = useState<BrokerAccountSnapshot | null>(null);
   const [positions, setPositions] = useState<PositionsResponse | null>(null);
   const [riskSettings, setRiskSettings] = useState<RiskSettings | null>(null);
   const [marketRegime, setMarketRegime] = useState<MarketRegimeSnapshot | null>(null);
   const [orderDraft, setOrderDraft] = useState<PaperOrderRequest>(emptyOrder);
+  const [optionOrderDraft, setOptionOrderDraft] = useState<MultiLegPaperOrderRequest | null>(null);
   const [reviewingOrder, setReviewingOrder] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -154,6 +163,7 @@ export function App() {
   const [journalFilter, setJournalFilter] = useState<JournalFilter>("all");
   const [backtestForm, setBacktestForm] = useState<BacktestForm>(defaultBacktestForm);
   const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
+  const [expressionPreference, setExpressionPreference] = useState<TradeExpressionPreference>("simple");
 
   useEffect(() => {
     void refreshBasics();
@@ -183,7 +193,13 @@ export function App() {
     void loadOptions(activeSignal.symbol);
     void loadAnalysisHistory(activeSignal.symbol);
     void loadQuantPlan(activeSignal);
+    void loadTradeExpressions(activeSignal, expressionPreference);
   }, [activeSignal]);
+
+  useEffect(() => {
+    if (!activeSignal) return;
+    void loadTradeExpressions(activeSignal, expressionPreference);
+  }, [expressionPreference]);
 
   const sortedSnapshots = useMemo(() => {
     return [...snapshots].sort((left, right) => right.score - left.score);
@@ -194,6 +210,7 @@ export function App() {
   const activeAnalysis = activeSignal ? analysisRuns[activeSignal.symbol] : null;
   const activeContext = activeSignal ? contextsBySymbol[activeSignal.symbol] ?? activeAnalysis?.context ?? activePlanRecord?.context ?? null : null;
   const activeOptions = activeSignal ? optionsBySymbol[activeSignal.symbol] ?? [] : [];
+  const activeTradeExpressions = activeSignal ? tradeExpressionsBySymbol[activeSignal.symbol] ?? activeAnalysis?.tradeExpressionResult ?? null : null;
   const filteredJournal = useMemo(() => filterJournalEntries(journal, journalFilter), [journal, journalFilter]);
   const journalCounts = useMemo(() => getJournalFilterCounts(journal), [journal]);
   const orderReferencePrice = orderDraft.orderType === "limit" ? orderDraft.limitPrice ?? null : activeSignal?.lastPrice ?? null;
@@ -219,6 +236,7 @@ export function App() {
         loadRiskSettings(),
         loadAlgoProposals(),
         loadPositionMonitor(),
+        loadOptionsSimulation(),
         loadMarketRegime()
       ]);
     } catch (error) {
@@ -288,6 +306,14 @@ export function App() {
       setPositionMonitor(await api<PositionMonitorSnapshot>("/api/positions/monitor"));
     } catch {
       setPositionMonitor(null);
+    }
+  }
+
+  async function loadOptionsSimulation() {
+    try {
+      setOptionsSimulation(await api<SimulatedOptionsSnapshot>("/api/paper/options-simulations"));
+    } catch {
+      setOptionsSimulation(null);
     }
   }
 
@@ -492,6 +518,26 @@ export function App() {
     }
   }
 
+  async function loadTradeExpressions(snapshot: SignalSnapshot, preference: TradeExpressionPreference) {
+    try {
+      const result = await api<TradeExpressionResult>("/api/trade-expressions", {
+        method: "POST",
+        body: JSON.stringify({
+          snapshot,
+          preference,
+          options: optionsBySymbol[snapshot.symbol]
+        })
+      });
+      setTradeExpressionsBySymbol((current) => ({ ...current, [snapshot.symbol]: result }));
+    } catch {
+      setTradeExpressionsBySymbol((current) => {
+        const next = { ...current };
+        delete next[snapshot.symbol];
+        return next;
+      });
+    }
+  }
+
   async function generateTradePlan() {
     if (!activeSignal) return;
     setBusy("ai");
@@ -510,6 +556,9 @@ export function App() {
       setContextsBySymbol((current) => ({ ...current, [activeSignal.symbol]: result.context }));
       if (result.quantitativePlan) {
         setQuantPlans((current) => ({ ...current, [activeSignal.symbol]: result.quantitativePlan as DeterministicTradePlan }));
+      }
+      if (result.tradeExpressionResult) {
+        setTradeExpressionsBySymbol((current) => ({ ...current, [activeSignal.symbol]: result.tradeExpressionResult as TradeExpressionResult }));
       }
       setAnalysisView("plan");
     } catch (error) {
@@ -530,6 +579,9 @@ export function App() {
       });
       setAnalysisRuns((current) => ({ ...current, [activeSignal.symbol]: result.analysisRun }));
       setContextsBySymbol((current) => ({ ...current, [activeSignal.symbol]: result.analysisRun.context }));
+      if (result.analysisRun.tradeExpressionResult) {
+        setTradeExpressionsBySymbol((current) => ({ ...current, [activeSignal.symbol]: result.analysisRun.tradeExpressionResult as TradeExpressionResult }));
+      }
       setAnalysisView("decision");
       setMessage("Decision Center analysis saved.");
     } catch (error) {
@@ -550,6 +602,9 @@ export function App() {
       });
       setAnalysisRuns((current) => ({ ...current, [activeSignal.symbol]: result.analysisRun }));
       setContextsBySymbol((current) => ({ ...current, [activeSignal.symbol]: result.analysisRun.context }));
+      if (result.analysisRun.tradeExpressionResult) {
+        setTradeExpressionsBySymbol((current) => ({ ...current, [activeSignal.symbol]: result.analysisRun.tradeExpressionResult as TradeExpressionResult }));
+      }
       setAlgoProposals((current) => {
         const ids = new Set(result.proposals.map((proposal) => proposal.id));
         return [...result.proposals, ...current.filter((proposal) => !ids.has(proposal.id))];
@@ -776,11 +831,70 @@ export function App() {
     }
   }
 
+  function draftExpressionOrder(expression: TradeExpression) {
+    if (expression.order) {
+      setOrderDraft((draft) => ({
+        ...draft,
+        ...expression.order,
+        sourcePlanId: activePlanRecord?.id,
+        sourceSignalAsOf: activeSignal?.asOf,
+        sourceAnalysisId: activeAnalysis?.id
+      }));
+      setWorkspaceView("orders");
+      setMessage(`${formatExpressionType(expression.expressionType)} loaded into the equity paper order ticket.`);
+      return;
+    }
+
+    if (expression.multiLegOrder && expression.status === "paper_trade_allowed") {
+      setOptionOrderDraft({
+        ...expression.multiLegOrder,
+        timeHorizon: expression.timeHorizon,
+        earningsChecked: false,
+        confirmedPaperOnly: false,
+        acceptedRisk: false,
+        maxLossAcknowledged: false,
+        paperSimulationAcknowledged: false,
+        noLiveEndpointAcknowledged: false,
+        sourcePlanId: activePlanRecord?.id,
+        sourceSignalAsOf: activeSignal?.asOf,
+        sourceAnalysisId: activeAnalysis?.id,
+        sourceExpressionId: expression.id,
+        followedPlan: activeSignal ? expressionMatchesActivePlan(expression, activeSignal, activeQuantPlan) : undefined
+      });
+      setMessage(null);
+      return;
+    }
+
+    setMessage("This expression is blocked or research-only.");
+  }
+
+  async function submitMultiLegPaperOrder() {
+    if (!optionOrderDraft) return;
+    setBusy("option-order");
+    setMessage(null);
+    try {
+      const result = await api<{ journalEntry?: TradeJournalEntry }>("/api/paper/multi-leg-orders", {
+        method: "POST",
+        body: JSON.stringify(optionOrderDraft)
+      });
+      setOptionOrderDraft(null);
+      setMessage("Options paper simulation created.");
+      if (result.journalEntry) {
+        setJournal((current) => [result.journalEntry as TradeJournalEntry, ...current.filter((entry) => entry.id !== result.journalEntry?.id)]);
+      }
+      await Promise.all([loadJournal(), loadPositionMonitor(), loadOptionsSimulation()]);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function refreshPositionMonitor() {
     setBusy("position-monitor");
     setMessage(null);
     try {
-      await Promise.all([loadPositions(), loadPositionMonitor()]);
+      await Promise.all([loadPositions(), loadPositionMonitor(), loadOptionsSimulation()]);
       setMessage("Position monitor refreshed.");
     } catch (error) {
       setMessage(getErrorMessage(error));
@@ -838,7 +952,38 @@ export function App() {
         ]);
       }
       setMessage(`${position.symbol} close request sent.`);
-      await Promise.all([loadAccount(), loadPositions(), loadJournal(), loadPositionMonitor()]);
+      await Promise.all([loadAccount(), loadPositions(), loadJournal(), loadPositionMonitor(), loadOptionsSimulation()]);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function closeSimulatedOptionsPosition(position: SimulatedOptionsPosition, exitReason: JournalExitReason = "manual") {
+    const confirm = window.prompt(`Type CLOSE OPTIONS SIMULATION to close ${position.underlyingSymbol} ${formatExpressionType(position.expressionType)}.`);
+    if (confirm !== "CLOSE OPTIONS SIMULATION") return;
+    setBusy(`close-options-sim-${position.id}`);
+    setMessage(null);
+    try {
+      const result = await api<{ journalEntry?: TradeJournalEntry }>(`/api/paper/options-simulations/${encodeURIComponent(position.id)}/close`, {
+        method: "POST",
+        body: JSON.stringify({
+          confirm,
+          exitReason,
+          exitValue: position.currentValue,
+          pnl: position.unrealizedPnL,
+          notes: `Closed internal options simulation. ${position.suggestedAction}`
+        })
+      });
+      if (result.journalEntry) {
+        setJournal((current) => [
+          result.journalEntry as TradeJournalEntry,
+          ...current.filter((entry) => entry.id !== result.journalEntry?.id)
+        ]);
+      }
+      setMessage(`${position.underlyingSymbol} options simulation closed.`);
+      await Promise.all([loadJournal(), loadPositionMonitor(), loadOptionsSimulation()]);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -895,6 +1040,13 @@ export function App() {
         <>
           <BeginnerGuidance signal={activeSignal} plan={activeTradePlan} />
           <QuantPlanCard plan={activeQuantPlan} signal={activeSignal} />
+          <TradeExpressionPanel
+            result={activeTradeExpressions}
+            preference={expressionPreference}
+            busy={busy === "option-order"}
+            onPreferenceChange={setExpressionPreference}
+            onDraft={draftExpressionOrder}
+          />
           <Sparkline bars={activeSignal.bars} />
           <MetricStrip signal={activeSignal} />
           <div className="notes">
@@ -1234,6 +1386,12 @@ export function App() {
                 onRefresh={refreshPositionMonitor}
                 onClose={closeMonitoredPosition}
               />
+              <OptionsSimulationPanel
+                snapshot={optionsSimulation}
+                busy={busy}
+                onRefresh={refreshPositionMonitor}
+                onClose={closeSimulatedOptionsPosition}
+              />
             </div>
           )}
 
@@ -1323,6 +1481,17 @@ export function App() {
             </button>
           </section>
         </div>
+      )}
+
+      {optionOrderDraft && (
+        <OptionsPaperOrderModal
+          order={optionOrderDraft}
+          busy={busy === "option-order"}
+          killSwitchEnabled={riskSettings?.killSwitchEnabled === true}
+          onChange={setOptionOrderDraft}
+          onClose={() => setOptionOrderDraft(null)}
+          onSubmit={submitMultiLegPaperOrder}
+        />
       )}
     </main>
   );
@@ -1682,6 +1851,7 @@ function BacktestsPanel({
         <div>
           <h2>Backtests</h2>
           <p>Long-only swing test using historical bars. Signals use only past data and enter on the next bar.</p>
+          <p>Backtest v1 currently validates long stock/ETF swing strategies using historical OHLCV data. It does not validate options, spreads, covered calls, cash-secured puts, short trades, or multi-leg positions.</p>
         </div>
         <div className="panelActions">
           {result && (
@@ -2181,6 +2351,123 @@ function PositionMonitorPanel({
   );
 }
 
+function OptionsSimulationPanel({
+  snapshot,
+  busy,
+  onRefresh,
+  onClose
+}: {
+  snapshot: SimulatedOptionsSnapshot | null;
+  busy: string | null;
+  onRefresh: () => void;
+  onClose: (position: SimulatedOptionsPosition, exitReason: JournalExitReason) => void;
+}) {
+  const positions = snapshot?.positions.slice(0, 8) ?? [];
+  const [exitReasons, setExitReasons] = useState<Record<string, JournalExitReason>>({});
+  const getExitReason = (id: string) => exitReasons[id] ?? "manual";
+
+  return (
+    <section className="panel monitorPanel" aria-label="Options Simulation Monitor">
+      <div className="panelTitle spaced">
+        <div>
+          <h2>Options Simulations</h2>
+          <p>Internal paper-only options positions. No broker options orders are submitted.</p>
+        </div>
+        <button className="textButton secondary" onClick={onRefresh} disabled={busy === "position-monitor"}>
+          {busy === "position-monitor" ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
+          <span>Refresh simulations</span>
+        </button>
+      </div>
+
+      {snapshot && (
+        <>
+          <div className="monitorSummary">
+            <span>{snapshot.exposure.totalOpenSimulations} simulations</span>
+            <span>{formatCurrency(snapshot.exposure.totalMaxLoss)} max loss</span>
+            <span>{formatCurrency(snapshot.exposure.totalRequiredCapital)} capital</span>
+            <span>{formatCurrency(snapshot.exposure.totalUnrealizedPnL)} open P/L</span>
+            <span>Updated {formatDateTime(snapshot.generatedAt)}</span>
+          </div>
+          {!!snapshot.exposure.byExpressionType.length && (
+            <div className="exposureBuckets" aria-label="Options exposure by expression">
+              {snapshot.exposure.byExpressionType.slice(0, 4).map((bucket) => (
+                <span key={bucket.key}>
+                  <strong>{formatExpressionType(bucket.key)}</strong>
+                  {bucket.count} open / {formatCurrency(bucket.maxLoss)} risk
+                </span>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {!positions.length ? (
+        <div className="algoEmpty">No open internal options simulations found.</div>
+      ) : (
+        <div className="monitorList">
+          {positions.map((position) => (
+            <article key={position.id} className={`monitorCard ${position.exitUrgency}`}>
+              <div className="algoTopline">
+                <div>
+                  <strong>{position.underlyingSymbol}</strong>
+                  <span>{formatExpressionType(position.expressionType)} - {formatPaperMode(position.paperExecutionMode)}</span>
+                </div>
+                <em>{position.exitUrgency}</em>
+              </div>
+              <p>{position.suggestedAction}</p>
+              <div className="strategyStats">
+                <span>Value {formatCurrency(position.currentValue)}</span>
+                <span>P/L {formatCurrency(position.unrealizedPnL)}</span>
+                {typeof position.unrealizedPnLPct === "number" && <span>{formatPct(position.unrealizedPnLPct)}</span>}
+                <span>Risk {formatCurrency(position.maxLoss)}</span>
+                {position.maxProfit !== undefined && <span>Max profit {formatCurrency(position.maxProfit)}</span>}
+                <span>{formatDte(position.daysToExpiration)} DTE</span>
+                <span>{position.quoteStatus.replaceAll("_", " ")}</span>
+              </div>
+              <div className="optionLegList compact">
+                {position.legs.map((leg) => (
+                  <span key={`${position.id}-${leg.optionSymbol}-${leg.side}`}>
+                    {leg.side.toUpperCase()} {leg.quantity} {leg.optionType} {leg.strike} {leg.expiration}
+                  </span>
+                ))}
+              </div>
+              <small>{position.exitReasons[0]}</small>
+              {position.warnings[0] && <small className="warningText">{position.warnings[0]}</small>}
+              <label className="exitReasonSelect">
+                <span>Exit reason</span>
+                <select
+                  value={getExitReason(position.id)}
+                  onChange={(event) => setExitReasons((current) => ({
+                    ...current,
+                    [position.id]: event.target.value as JournalExitReason
+                  }))}
+                >
+                  <option value="manual">Manual</option>
+                  <option value="target">Target</option>
+                  <option value="stop">Stop</option>
+                  <option value="time_exit">Time exit</option>
+                  <option value="score_drop">Score drop</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <div className="algoActions">
+                <button
+                  className={`textButton ${position.exitUrgency === "exit" ? "danger" : "ghost"}`}
+                  onClick={() => onClose(position, getExitReason(position.id))}
+                  disabled={busy === `close-options-sim-${position.id}`}
+                >
+                  {busy === `close-options-sim-${position.id}` ? <Loader2 className="spin" size={16} /> : <AlertTriangle size={16} />}
+                  <span>Close simulation</span>
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function getOpportunitySummary(scan: OpportunityScan | null): string {
   if (!scan) return "Closed. Expand to find ranked tickers.";
   const top = scan.candidates[0];
@@ -2309,6 +2596,163 @@ function QuantPlanCard({ plan, signal }: { plan: DeterministicTradePlan | null; 
           {[...plan.keyRisks, ...plan.warnings].slice(0, 3).map((risk) => <p key={risk}>{risk}</p>)}
         </div>
       </div>
+    </section>
+  );
+}
+
+function TradeExpressionPanel({
+  result,
+  preference,
+  busy,
+  onPreferenceChange,
+  onDraft
+}: {
+  result: TradeExpressionResult | null;
+  preference: TradeExpressionPreference;
+  busy: boolean;
+  onPreferenceChange: (preference: TradeExpressionPreference) => void;
+  onDraft: (expression: TradeExpression) => void;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const expressions = useMemo(() => {
+    if (!result) return [];
+    const map = new Map<string, TradeExpression>();
+    [result.recommendedExpression, ...result.alternatives, ...result.blockedExpressions].forEach((expression) => {
+      map.set(expression.id, expression);
+    });
+    return [...map.values()];
+  }, [result]);
+  const selected = expressions.find((expression) => expression.id === selectedId)
+    ?? result?.recommendedExpression
+    ?? expressions[0]
+    ?? null;
+
+  useEffect(() => {
+    setSelectedId(result?.recommendedExpression.id ?? null);
+  }, [result?.generatedAt, result?.recommendedExpression.id]);
+
+  if (!result) return <EmptyState text="Trade expressions load after selecting a symbol." />;
+
+  return (
+    <section className="expressionPanel" aria-label="Trade expression comparison">
+      <div className="sectionHeader expressionHeader">
+        <div>
+          <h3>Trade Expression</h3>
+          <span>{formatExpressionType(result.recommendedExpression.expressionType)} selected</span>
+        </div>
+        <select value={preference} onChange={(event) => onPreferenceChange(event.target.value as TradeExpressionPreference)} aria-label="Expression preference">
+          <option value="simple">Simple</option>
+          <option value="defined_risk">Defined risk</option>
+          <option value="income">Income</option>
+          <option value="leverage">Leverage</option>
+          <option value="capital_efficient">Capital efficient</option>
+        </select>
+      </div>
+
+      <div className="expressionThesis">
+        <div>
+          <span>Ticker</span>
+          <strong>{result.thesis.ticker}</strong>
+        </div>
+        <div>
+          <span>Regime</span>
+          <strong>{result.thesis.marketRegime ?? "--"}</strong>
+        </div>
+        <div>
+          <span>Bias</span>
+          <strong>{result.thesis.bias}</strong>
+        </div>
+        <div>
+          <span>Confidence</span>
+          <strong>{result.thesis.confidence}</strong>
+        </div>
+      </div>
+
+      {result.riskWarnings.length > 0 && (
+        <div className="contextWarnings">
+          {result.riskWarnings.slice(0, 3).map((warning) => (
+            <p key={warning}>{warning}</p>
+          ))}
+        </div>
+      )}
+
+      <div className="tableWrap expressionTable">
+        <table>
+          <thead>
+            <tr>
+              <th>Expression</th>
+              <th>Dir</th>
+              <th>Capital</th>
+              <th>Max loss</th>
+              <th>Max profit</th>
+              <th>BE</th>
+              <th>R/R</th>
+              <th>DTE</th>
+              <th>Liquidity</th>
+              <th>Paper</th>
+              <th>Warnings</th>
+            </tr>
+          </thead>
+          <tbody>
+            {expressions.map((expression) => (
+              <tr
+                key={expression.id}
+                className={selected?.id === expression.id ? "selectedRow" : ""}
+                onClick={() => setSelectedId(expression.id)}
+              >
+                <td>{formatExpressionType(expression.expressionType)}</td>
+                <td>{expression.direction}</td>
+                <td>{formatOptionalCurrency(expression.requiredCapital)}</td>
+                <td>{formatOptionalCurrency(expression.maxLoss)}</td>
+                <td>{formatOptionalCurrency(expression.maxProfit)}</td>
+                <td>{formatOptionalCurrency(expression.breakeven)}</td>
+                <td>{expression.riskReward === null ? "--" : expression.riskReward}</td>
+                <td>{formatDte(expression.dte)}</td>
+                <td>{expression.liquidityScore ?? "--"}</td>
+                <td>{formatExpressionStatus(expression.status)}</td>
+                <td>{getExpressionWarnings(expression).slice(0, 2).join(" ") || "--"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {selected && (
+        <article className={`expressionDetail ${selected.status}`}>
+          <div className="expressionDetailTop">
+            <div>
+              <span>{formatExpressionStatus(selected.status)}</span>
+              <strong>{formatExpressionType(selected.expressionType)}</strong>
+            </div>
+            {(selected.order || selected.multiLegOrder) && selected.status === "paper_trade_allowed" && (
+              <button className="textButton secondary" type="button" onClick={() => onDraft(selected)} disabled={busy}>
+                {busy ? <Loader2 className="spin" size={16} /> : <ClipboardCheck size={16} />}
+                <span>{selected.multiLegOrder ? "Draft simulation" : "Use equity ticket"}</span>
+              </button>
+            )}
+          </div>
+          <p>{selected.rationale.join(" ")}</p>
+          {selected.statusReasons.length > 0 && <small>{selected.statusReasons.join(" ")}</small>}
+          {selected.multiLegOrder && (
+            <div className="legList">
+              {selected.multiLegOrder.legs.map((leg) => (
+                <div key={`${leg.optionSymbol}-${leg.side}`}>
+                  <span>{leg.side.toUpperCase()} {leg.optionType}</span>
+                  <strong>{leg.optionSymbol}</strong>
+                  <small>{leg.expiration} / {formatCurrency(leg.strike)} / mid {formatOptionalCurrency(leg.estimatedMid ?? null)}</small>
+                </div>
+              ))}
+            </div>
+          )}
+          {getExpressionWarnings(selected).length > 0 && (
+            <div className="expressionWarnings">
+              {getExpressionWarnings(selected).slice(0, 5).map((warning) => (
+                <p key={warning}>{warning}</p>
+              ))}
+            </div>
+          )}
+        </article>
+      )}
     </section>
   );
 }
@@ -2445,6 +2889,7 @@ function PaperOrderForm({
           Target {formatDistancePct(targetRealism.targetDistancePct)} / Stop {formatDistancePct(targetRealism.stopDistancePct)}
         </strong>
         {targetRealism.message && <small>{targetRealism.message}</small>}
+        {orderDraft.side === "sell" && <small>Short equity paper trade: stop loss and max-risk estimate are required.</small>}
       </div>
       <div className="checkboxStack">
         <label>
@@ -2470,6 +2915,118 @@ function PaperOrderForm({
         <span>Review order</span>
       </button>
     </form>
+  );
+}
+
+function OptionsPaperOrderModal({
+  order,
+  busy,
+  killSwitchEnabled,
+  onChange,
+  onClose,
+  onSubmit
+}: {
+  order: MultiLegPaperOrderRequest;
+  busy: boolean;
+  killSwitchEnabled: boolean;
+  onChange: (order: MultiLegPaperOrderRequest) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  const update = (patch: Partial<MultiLegPaperOrderRequest>) => onChange({ ...order, ...patch });
+  const confirmationsOk = order.earningsChecked
+    && order.confirmedPaperOnly
+    && order.acceptedRisk
+    && order.maxLossAcknowledged
+    && order.paperSimulationAcknowledged
+    && order.noLiveEndpointAcknowledged
+    && !killSwitchEnabled
+    && order.paperExecutionMode === "internal_simulation";
+
+  return (
+    <div className="modalOverlay" role="presentation">
+      <section className="modal optionsModal" role="dialog" aria-modal="true" aria-label="Review options paper simulation">
+        <div className="panelTitle spaced">
+          <div>
+            <h2>Review options simulation</h2>
+            <p>{formatExpressionType(order.expressionType)} / {order.underlyingSymbol}</p>
+          </div>
+          <button className="iconButton" onClick={onClose} aria-label="Close review">
+            x
+          </button>
+        </div>
+
+        <dl className="reviewList">
+          <div>
+            <dt>Mode</dt>
+            <dd>{formatPaperMode(order.paperExecutionMode)}</dd>
+          </div>
+          <div>
+            <dt>Capital</dt>
+            <dd>{formatCurrency(order.requiredCapital)}</dd>
+          </div>
+          <div>
+            <dt>Max loss</dt>
+            <dd>{formatCurrency(order.maxLoss)}</dd>
+          </div>
+          <div>
+            <dt>Max profit</dt>
+            <dd>{formatOptionalCurrency(order.maxProfit ?? null)}</dd>
+          </div>
+          <div>
+            <dt>Breakeven</dt>
+            <dd>{formatOptionalCurrency(order.breakeven ?? null)}</dd>
+          </div>
+          <div>
+            <dt>Debit / credit</dt>
+            <dd>{order.estimatedDebit !== undefined ? formatCurrency(order.estimatedDebit) : order.estimatedCredit !== undefined ? formatCurrency(order.estimatedCredit) : "--"}</dd>
+          </div>
+        </dl>
+
+        <div className="legList modalLegs">
+          {order.legs.map((leg) => (
+            <div key={`${leg.optionSymbol}-${leg.side}`}>
+              <span>{leg.side.toUpperCase()} {leg.optionType}</span>
+              <strong>{leg.optionSymbol}</strong>
+              <small>{leg.expiration} / {formatCurrency(leg.strike)} / bid {formatOptionalCurrency(leg.bid ?? null)} / ask {formatOptionalCurrency(leg.ask ?? null)}</small>
+            </div>
+          ))}
+        </div>
+
+        {killSwitchEnabled && <p className="realismNotice danger">Kill switch is enabled.</p>}
+        <div className="checkboxStack">
+          <label>
+            <input type="checkbox" checked={order.confirmedPaperOnly} onChange={(event) => update({ confirmedPaperOnly: event.target.checked })} />
+            <span>Paper options only</span>
+          </label>
+          <label>
+            <input type="checkbox" checked={order.paperSimulationAcknowledged} onChange={(event) => update({ paperSimulationAcknowledged: event.target.checked })} />
+            <span>Internal simulation acknowledged</span>
+          </label>
+          <label>
+            <input type="checkbox" checked={order.noLiveEndpointAcknowledged} onChange={(event) => update({ noLiveEndpointAcknowledged: event.target.checked })} />
+            <span>No live endpoint</span>
+          </label>
+          <label>
+            <input type="checkbox" checked={order.earningsChecked} onChange={(event) => update({ earningsChecked: event.target.checked })} />
+            <span>Earnings checked</span>
+          </label>
+          <label>
+            <input type="checkbox" checked={order.maxLossAcknowledged} onChange={(event) => update({ maxLossAcknowledged: event.target.checked })} />
+            <span>Max loss acknowledged</span>
+          </label>
+          <label>
+            <input type="checkbox" checked={order.acceptedRisk} onChange={(event) => update({ acceptedRisk: event.target.checked })} />
+            <span>Risk accepted</span>
+          </label>
+        </div>
+
+        <button className="wideButton danger" onClick={onSubmit} disabled={busy || !confirmationsOk}>
+          {busy ? <Loader2 className="spin" size={17} /> : <CheckCircle2 size={17} />}
+          <span>Create paper simulation</span>
+        </button>
+      </section>
+    </div>
   );
 }
 
@@ -2663,7 +3220,11 @@ function RiskSettingsPanel({
       minRiskReward: Math.max(0.1, draft.minRiskReward),
       maxDataAgeMinutes: Math.max(1, Math.round(draft.maxDataAgeMinutes)),
       priceCollarPct: clampFraction(draft.priceCollarPct, 0.001, 0.5),
-      earningsWindowDays: Math.max(0, Math.round(draft.earningsWindowDays))
+      earningsWindowDays: Math.max(0, Math.round(draft.earningsWindowDays)),
+      maxOpenPositions: Math.max(1, Math.round(draft.maxOpenPositions ?? 12)),
+      maxOptionsContracts: Math.max(0, Math.round(draft.maxOptionsContracts ?? 4)),
+      maxStrategyExposurePct: clampFraction(draft.maxStrategyExposurePct ?? draft.maxPositionPct, 0.001, 1),
+      allowZeroDte: draft.allowZeroDte === true
     });
   };
 
@@ -2755,6 +3316,45 @@ function RiskSettingsPanel({
             value={draft.earningsWindowDays}
             onChange={(event) => updateNumber(update, "earningsWindowDays", event.target.value)}
           />
+        </label>
+        <label>
+          <span>Max open positions</span>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            value={draft.maxOpenPositions ?? 12}
+            onChange={(event) => updateNumber(update, "maxOpenPositions", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Max options contracts</span>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={draft.maxOptionsContracts ?? 4}
+            onChange={(event) => updateNumber(update, "maxOptionsContracts", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Strategy exposure %</span>
+          <input
+            type="number"
+            min="0.1"
+            max="100"
+            step="0.5"
+            value={fractionToPercentInput(draft.maxStrategyExposurePct ?? draft.maxPositionPct)}
+            onChange={(event) => updatePercent(update, "maxStrategyExposurePct", event.target.value)}
+          />
+        </label>
+        <label className="riskToggle">
+          <input
+            type="checkbox"
+            checked={draft.allowZeroDte === true}
+            onChange={(event) => update({ allowZeroDte: event.target.checked })}
+          />
+          <span>Allow 0DTE</span>
         </label>
         <label className="riskToggle">
           <input
@@ -2875,6 +3475,14 @@ function ContextPanel({ context }: { context?: TradeContext }) {
 
 function JournalAnalyticsSummary({ analytics }: { analytics: JournalAnalytics | null }) {
   if (!analytics) return <EmptyState text="Journal analytics unavailable" />;
+  const performanceByExpressionType = analytics.performanceByExpressionType ?? [];
+  const optionsMetrics = analytics.optionsMetrics ?? {
+    averageDteAtEntry: null,
+    performanceByDteBucket: [],
+    performanceByOptionType: [],
+    performanceByStructure: [],
+    assignmentRiskEvents: 0
+  };
 
   return (
     <section className="journalAnalytics" aria-label="Journal analytics">
@@ -2916,6 +3524,14 @@ function JournalAnalyticsSummary({ analytics }: { analytics: JournalAnalytics | 
           {analytics.worstTrade && <p>Worst: {analytics.worstTrade.symbol} {formatCurrency(analytics.worstTrade.pnl)}</p>}
           {analytics.mostCommonExitReason && <p>Common exit: {formatExitReason(analytics.mostCommonExitReason)}</p>}
           {analytics.mostCommonSkippedReason && <p>Common skip: {analytics.mostCommonSkippedReason}</p>}
+        </div>
+      )}
+      {performanceByExpressionType.length > 0 && (
+        <div className="journalInsight expressionInsight">
+          {performanceByExpressionType.slice(0, 4).map((stat) => (
+            <p key={stat.key}>{formatExpressionType(stat.key)}: {stat.trades} trades / {stat.averageR === null ? "--" : `${stat.averageR}R`}</p>
+          ))}
+          {optionsMetrics.averageDteAtEntry !== null && <p>Avg options DTE: {optionsMetrics.averageDteAtEntry}</p>}
         </div>
       )}
     </section>
@@ -3026,6 +3642,16 @@ function JournalEntryCard({
         </button>
       </div>
       <p>{formatAction(entry.action)} - {entry.notes || "No notes"}</p>
+      {(entry.expressionType || entry.paperExecutionMode) && (
+        <div className="journalMeta">
+          {entry.expressionType && <span>{formatExpressionType(entry.expressionType)}</span>}
+          {entry.paperExecutionMode && <span>{formatPaperMode(entry.paperExecutionMode)}</span>}
+          {typeof entry.maxLoss === "number" && <span>Max loss {formatCurrency(entry.maxLoss)}</span>}
+        </div>
+      )}
+      {entry.optionLegs && entry.optionLegs.length > 0 && (
+        <small>{entry.optionLegs.map((leg) => `${leg.side} ${leg.optionType} ${leg.strike} ${leg.expiration}`).join(" / ")}</small>
+      )}
       {entry.status === "paper_closed" && (
         <div className="journalMeta">
           {entry.exitReason && <span>Exit: {formatExitReason(entry.exitReason)}</span>}
@@ -3128,10 +3754,16 @@ function OptionsTable({ options }: { options: OptionIdea[] }) {
             <th>Contract</th>
             <th>Type</th>
             <th>Exp</th>
+            <th>DTE</th>
             <th>Strike</th>
+            <th>Bid</th>
+            <th>Ask</th>
+            <th>Mid/last</th>
             <th>IV</th>
             <th>Delta</th>
             <th>POP</th>
+            <th>OI/Vol</th>
+            <th>Liquidity</th>
           </tr>
         </thead>
         <tbody>
@@ -3140,10 +3772,16 @@ function OptionsTable({ options }: { options: OptionIdea[] }) {
               <td>{option.symbol}</td>
               <td>{option.type}</td>
               <td>{option.expirationDate}</td>
+              <td>{formatDte(option.daysToExpiration)}</td>
               <td>{formatCurrency(option.strikePrice)}</td>
+              <td>{formatOptionalCurrency(option.bidPrice ?? null)}</td>
+              <td>{formatOptionalCurrency(option.askPrice ?? null)}</td>
+              <td>{formatOptionalCurrency(option.midPrice ?? option.lastPrice ?? option.closePrice)}</td>
               <td>{formatOptionalPct(option.impliedVolatility)}</td>
               <td>{formatNumber(option.delta)}</td>
               <td>{formatOptionalPct(option.probabilityOfProfit)}</td>
+              <td>{option.openInterest ?? "--"} / {option.volume ?? "--"}</td>
+              <td>{option.liquidityWarning ?? option.liquidityScore ?? "--"}</td>
             </tr>
           ))}
         </tbody>
@@ -3203,7 +3841,7 @@ function getBeginnerAction(signal: SignalSnapshot, plan?: TradePlan | null): Beg
       tone: "danger",
       action: "This is not a good long/buy setup yet. If you do not already own it, waiting is the cleaner move.",
       why: `The trend is ${signal.trend} and the current bias is ${signal.bias}. A high risk/reward number can still be misleading when the trend is down.`,
-      options: "Bearish options may exist, but this app is analyze-only for options and does not place options trades."
+      options: "Bearish option expressions may exist, but only defined-risk paper simulations are available after manual review."
     };
   }
 
@@ -3422,6 +4060,16 @@ function orderMatchesActivePlan(order: PaperOrderRequest, signal: SignalSnapshot
   return pricesMatch(order.stopLossPrice, plannedStop) && pricesMatch(order.takeProfitPrice, plannedTarget);
 }
 
+function expressionMatchesActivePlan(expression: TradeExpression, signal: SignalSnapshot, quantPlan: DeterministicTradePlan | null): boolean {
+  if (expression.expressionType === "long_equity" || expression.expressionType === "short_equity") {
+    return expression.order ? orderMatchesActivePlan(expression.order, signal, quantPlan) : false;
+  }
+  if (expression.status !== "paper_trade_allowed") return false;
+  if (signal.bias === "bullish") return expression.direction === "bullish" || expression.expressionType === "cash_secured_put" || expression.expressionType === "covered_call";
+  if (signal.bias === "bearish") return expression.direction === "bearish";
+  return expression.expressionType === "no_trade" || expression.direction === "neutral";
+}
+
 function pricesMatch(left?: number | null, right?: number | null): boolean {
   if (typeof left !== "number" || typeof right !== "number") return false;
   return Math.abs(left - right) < 0.01;
@@ -3451,6 +4099,10 @@ function formatCurrency(value?: number | null): string {
     currency: "USD",
     maximumFractionDigits: value > 100 ? 0 : 2
   }).format(value);
+}
+
+function formatOptionalCurrency(value?: number | null): string {
+  return formatCurrency(value);
 }
 
 function formatPriceZone(zone: { low: number | null; high: number | null }): string {
@@ -3494,6 +4146,10 @@ function formatOptionalPct(value?: number | null): string {
 
 function formatNumber(value?: number | null): string {
   return typeof value === "number" && Number.isFinite(value) ? String(value) : "--";
+}
+
+function formatDte(value?: number | null): string {
+  return typeof value === "number" && Number.isFinite(value) ? `${value}` : "--";
 }
 
 function formatAiProvider(provider?: HealthStatus["aiProvider"]): string {
@@ -3568,6 +4224,8 @@ function formatAction(action?: TradeAction): string {
       return "Paper long candidate";
     case "paper_short_candidate":
       return "Paper short candidate";
+    case "paper_options_candidate":
+      return "Paper options candidate";
     case "options_research_only":
       return "Options research only";
     case "avoid":
@@ -3576,6 +4234,37 @@ function formatAction(action?: TradeAction): string {
     default:
       return "Watch";
   }
+}
+
+function formatExpressionType(type?: string): string {
+  if (!type) return "--";
+  return type
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatExpressionStatus(status: TradeExpression["status"]): string {
+  if (status === "paper_trade_allowed") return "Paper eligible";
+  if (status === "research_only") return "Research only";
+  return "Blocked";
+}
+
+function formatPaperMode(mode?: string): string {
+  if (mode === "broker_paper") return "Broker paper";
+  if (mode === "internal_simulation") return "Internal simulation";
+  if (mode === "research_only") return "Research only";
+  return "--";
+}
+
+function getExpressionWarnings(expression: TradeExpression): string[] {
+  return [
+    ...expression.liquidityWarnings,
+    ...expression.volatilityWarnings,
+    ...expression.earningsWarnings,
+    ...expression.assignmentWarnings,
+    ...expression.statusReasons
+  ].filter(Boolean);
 }
 
 function filterJournalEntries(journal: TradeJournalEntry[], filter: JournalFilter): TradeJournalEntry[] {

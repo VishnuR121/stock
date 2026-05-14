@@ -107,7 +107,27 @@ export const journalEntries = pgTable("journal_entries", {
   stopLossPrice: numeric("stop_loss_price"),
   takeProfitPrice: numeric("take_profit_price"),
   outcome: text("outcome").$type<TradeJournalEntry["outcome"]>(),
-  pnl: numeric("pnl")
+  pnl: numeric("pnl"),
+  expressionType: text("expression_type").$type<TradeJournalEntry["expressionType"]>(),
+  underlyingSymbol: text("underlying_symbol"),
+  assetClass: text("asset_class").$type<TradeJournalEntry["assetClass"]>(),
+  optionLegs: jsonb("option_legs").$type<TradeJournalEntry["optionLegs"]>(),
+  maxLoss: numeric("max_loss"),
+  maxProfit: numeric("max_profit"),
+  breakeven: numeric("breakeven"),
+  requiredCapital: numeric("required_capital"),
+  entryThesis: text("entry_thesis"),
+  exitThesis: text("exit_thesis"),
+  entryMarketRegime: text("entry_market_regime").$type<TradeJournalEntry["entryMarketRegime"]>(),
+  entryScore: integer("entry_score"),
+  aiConfidence: text("ai_confidence").$type<TradeJournalEntry["aiConfidence"]>(),
+  paperExecutionMode: text("paper_execution_mode").$type<TradeJournalEntry["paperExecutionMode"]>(),
+  brokerOrderIds: jsonb("broker_order_ids").$type<string[]>(),
+  optionsMetadata: jsonb("options_metadata").$type<Record<string, unknown>>(),
+  strategyWarnings: jsonb("strategy_warnings").$type<string[]>(),
+  realizedPnL: numeric("realized_pnl"),
+  actualRMultiple: numeric("actual_r_multiple"),
+  strategyCategory: text("strategy_category")
 });
 
 export const apiCallLog = pgTable("api_call_log", {
