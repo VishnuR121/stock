@@ -255,12 +255,53 @@ describe("API safety behavior", () => {
       dataFilePath: `data/test-close-position-${Date.now()}.json`
     });
 
-    await request(app)
+    const opened = await request(app)
+      .post("/api/journal")
+      .send({
+        symbol: "XLI",
+        status: "paper_open",
+        action: "paper_long_candidate",
+        notes: "Opened from paper order.",
+        entryPrice: 100,
+        stopLossPrice: 95,
+        takeProfitPrice: 115,
+        outcome: "open",
+        followedPlan: true
+      })
+      .expect(200);
+
+    const closed = await request(app)
       .post("/api/alpaca/paper-positions/XLI/close")
-      .send({ confirm: "CLOSE PAPER POSITION", action: "paper_long_candidate", pnl: 15 })
+      .send({
+        confirm: "CLOSE PAPER POSITION",
+        action: "paper_long_candidate",
+        exitReason: "target",
+        exitPrice: 115,
+        pnl: 15,
+        notes: "Closed at target."
+      })
       .expect(200);
 
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/v2/positions/XLI"), expect.objectContaining({ method: "DELETE" }));
+    expect(closed.body.journalEntry).toMatchObject({
+      id: opened.body.id,
+      status: "paper_closed",
+      exitReason: "target",
+      entryPrice: 100,
+      stopLossPrice: 95,
+      exitPrice: 115,
+      pnl: 15,
+      outcome: "win"
+    });
+
+    const journal = await request(app).get("/api/journal").expect(200);
+    expect(journal.body).toHaveLength(1);
+    expect(journal.body[0].status).toBe("paper_closed");
+
+    const analytics = await request(app).get("/api/journal/analytics").expect(200);
+    expect(analytics.body.openPaperTrades).toBe(0);
+    expect(analytics.body.closedPaperTrades).toBe(1);
+    expect(analytics.body.mostCommonExitReason).toBe("target");
   });
 
   it("requires a TradingView webhook secret", async () => {

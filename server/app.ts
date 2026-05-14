@@ -639,16 +639,26 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
     const result = await alpaca.closePosition(symbol);
     const exitPrice = optionalNumber(request.body?.exitPrice);
     const pnl = optionalNumber(request.body?.pnl);
-    await store.addJournalEntry({
-      symbol,
-      status: "paper_closed",
+    const exitReason = normalizeJournalExitReason(request.body?.exitReason) ?? "manual";
+    const outcome: "win" | "loss" | "breakeven" | undefined =
+      pnl === undefined ? undefined : pnl > 0 ? "win" : pnl < 0 ? "loss" : "breakeven";
+    const journalPatch = {
+      status: "paper_closed" as const,
       action: normalizeAction(request.body?.action),
       notes: String(request.body?.notes ?? "Closed from Position Monitor."),
+      exitReason,
       exitPrice,
       pnl,
-      outcome: pnl === undefined ? undefined : pnl > 0 ? "win" : pnl < 0 ? "loss" : "breakeven"
+      outcome
+    };
+    const openEntry = (await store.getJournal()).find((entry) => entry.symbol === normalizeSymbol(symbol) && entry.status === "paper_open");
+    const journalEntry = openEntry
+      ? await store.updateJournalEntry(openEntry.id, journalPatch)
+      : await store.addJournalEntry({
+      symbol,
+      ...journalPatch
     });
-    response.json({ result });
+    response.json({ result, journalEntry });
   }));
 
   app.post("/api/alpaca/paper-positions/flatten", asyncHandler(async (request, response) => {

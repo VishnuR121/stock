@@ -431,6 +431,20 @@ export class DatabaseStore implements AppStore {
     return next;
   }
 
+  async updateJournalEntry(id: string, patch: Partial<Omit<TradeJournalEntry, "id" | "createdAt">>): Promise<TradeJournalEntry> {
+    const current = (await this.getJournal()).find((entry) => entry.id === id);
+    if (!current) throw new Error("Journal entry not found.");
+    const next: TradeJournalEntry = {
+      ...current,
+      ...patch,
+      id,
+      createdAt: current.createdAt,
+      updatedAt: new Date().toISOString()
+    };
+    await this.upsertJournalEntry(next);
+    return next;
+  }
+
   async getJournal(): Promise<TradeJournalEntry[]> {
     const rows = await this.db.select().from(journalEntries).orderBy(desc(journalEntries.createdAt)).limit(250);
     return rows.map((row) => ({

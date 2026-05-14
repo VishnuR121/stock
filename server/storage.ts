@@ -44,6 +44,7 @@ export interface AppStore {
   updateAlgoTradeProposal(id: string, patch: Partial<AlgoTradeProposal>): Promise<AlgoTradeProposal>;
   deleteAlgoTradeProposal(id: string): Promise<{ id: string }>;
   addJournalEntry(entry: Omit<TradeJournalEntry, "id" | "createdAt" | "updatedAt">): Promise<TradeJournalEntry>;
+  updateJournalEntry(id: string, patch: Partial<Omit<TradeJournalEntry, "id" | "createdAt">>): Promise<TradeJournalEntry>;
   getJournal(): Promise<TradeJournalEntry[]>;
   deleteJournalEntry(id: string): Promise<{ id: string }>;
 }
@@ -301,6 +302,22 @@ export class JsonStore implements AppStore {
     };
     data.journal.unshift(next);
     data.journal = data.journal.slice(0, 250);
+    await this.write(data);
+    return next;
+  }
+
+  async updateJournalEntry(id: string, patch: Partial<Omit<TradeJournalEntry, "id" | "createdAt">>): Promise<TradeJournalEntry> {
+    const data = await this.read();
+    const index = data.journal.findIndex((entry) => entry.id === id);
+    if (index === -1) throw new Error("Journal entry not found.");
+    const next: TradeJournalEntry = {
+      ...data.journal[index],
+      ...patch,
+      id,
+      createdAt: data.journal[index].createdAt,
+      updatedAt: new Date().toISOString()
+    };
+    data.journal[index] = next;
     await this.write(data);
     return next;
   }

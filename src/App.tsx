@@ -784,16 +784,23 @@ export function App() {
     setBusy(`close-position-${position.symbol}`);
     setMessage(null);
     try {
-      await api(`/api/alpaca/paper-positions/${encodeURIComponent(position.symbol)}/close`, {
+      const result = await api<{ journalEntry?: TradeJournalEntry }>(`/api/alpaca/paper-positions/${encodeURIComponent(position.symbol)}/close`, {
         method: "POST",
         body: JSON.stringify({
           confirm,
           action: position.executionType === "long_option" ? "options_research_only" : position.side === "short" ? "paper_short_candidate" : "paper_long_candidate",
+          exitReason: "manual",
           exitPrice: position.currentPrice,
           pnl: position.unrealizedPl,
           notes: `Closed from Position Monitor. ${position.suggestedAction}`
         })
       });
+      if (result.journalEntry) {
+        setJournal((current) => [
+          result.journalEntry as TradeJournalEntry,
+          ...current.filter((entry) => entry.id !== result.journalEntry?.id)
+        ]);
+      }
       setMessage(`${position.symbol} close request sent.`);
       await Promise.all([loadAccount(), loadPositions(), loadJournal(), loadPositionMonitor()]);
     } catch (error) {
