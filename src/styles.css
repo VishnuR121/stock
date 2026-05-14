@@ -1931,6 +1931,30 @@ select {
   height: 30px;
 }
 
+.journalMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.journalMeta span {
+  border-radius: 8px;
+  padding: 5px 8px;
+  background: var(--surface-muted);
+}
+
+.exitReasonSelect {
+  display: grid;
+  gap: 5px;
+}
+
+.exitReasonSelect span {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
 .decisionCenter {
   display: grid;
   gap: 14px;

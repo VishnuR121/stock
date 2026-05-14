@@ -30,6 +30,7 @@ import type {
   EnrichedTradePlanResponse,
   HealthStatus,
   JournalAnalytics,
+  JournalExitReason,
   MarketRegimeLabel,
   MarketRegimeSnapshot,
   OpportunityCandidate,
@@ -778,7 +779,7 @@ export function App() {
     }
   }
 
-  async function closeMonitoredPosition(position: MonitoredPosition) {
+  async function closeMonitoredPosition(position: MonitoredPosition, exitReason: JournalExitReason = "manual") {
     const confirm = window.prompt(`Type CLOSE PAPER POSITION to close ${position.symbol}.`);
     if (confirm !== "CLOSE PAPER POSITION") return;
     setBusy(`close-position-${position.symbol}`);
@@ -789,7 +790,7 @@ export function App() {
         body: JSON.stringify({
           confirm,
           action: position.executionType === "long_option" ? "options_research_only" : position.side === "short" ? "paper_short_candidate" : "paper_long_candidate",
-          exitReason: "manual",
+          exitReason,
           exitPrice: position.currentPrice,
           pnl: position.unrealizedPl,
           notes: `Closed from Position Monitor. ${position.suggestedAction}`
@@ -2053,9 +2054,11 @@ function PositionMonitorPanel({
   monitor: PositionMonitorSnapshot | null;
   busy: string | null;
   onRefresh: () => void;
-  onClose: (position: MonitoredPosition) => void;
+  onClose: (position: MonitoredPosition, exitReason: JournalExitReason) => void;
 }) {
   const positions = monitor?.positions.slice(0, 6) ?? [];
+  const [exitReasons, setExitReasons] = useState<Record<string, JournalExitReason>>({});
+  const getExitReason = (symbol: string) => exitReasons[symbol] ?? "manual";
 
   return (
     <section className="panel monitorPanel" aria-label="Position Monitor">
@@ -2105,10 +2108,27 @@ function PositionMonitorPanel({
                 {position.takeProfitPrice !== undefined && <span>Target {formatCurrency(position.takeProfitPrice)}</span>}
               </div>
               <small>{position.reasons[0]}</small>
+              <label className="exitReasonSelect">
+                <span>Exit reason</span>
+                <select
+                  value={getExitReason(position.symbol)}
+                  onChange={(event) => setExitReasons((current) => ({
+                    ...current,
+                    [position.symbol]: event.target.value as JournalExitReason
+                  }))}
+                >
+                  <option value="manual">Manual</option>
+                  <option value="target">Target</option>
+                  <option value="stop">Stop</option>
+                  <option value="time_exit">Time exit</option>
+                  <option value="score_drop">Score drop</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
               <div className="algoActions">
                 <button
                   className={`textButton ${position.urgency === "exit" ? "danger" : "ghost"}`}
-                  onClick={() => onClose(position)}
+                  onClick={() => onClose(position, getExitReason(position.symbol))}
                   disabled={busy === `close-position-${position.symbol}`}
                 >
                   {busy === `close-position-${position.symbol}` ? <Loader2 className="spin" size={16} /> : <AlertTriangle size={16} />}
@@ -2879,6 +2899,10 @@ function JournalList({
     <div className="journalList">
       {journal.slice(0, 6).map((entry) => (
         <article key={entry.id}>
+          {(() => {
+            const rMultiple = getJournalRMultiple(entry);
+            return (
+              <>
           <div className="journalTopline">
             <strong>{entry.symbol}</strong>
             <span>{entry.status.replace("_", " ")}</span>
@@ -2893,6 +2917,13 @@ function JournalList({
             </button>
           </div>
           <p>{formatAction(entry.action)} - {entry.notes || "No notes"}</p>
+          {entry.status === "paper_closed" && (
+            <div className="journalMeta">
+              {entry.exitReason && <span>Exit: {formatExitReason(entry.exitReason)}</span>}
+              {rMultiple !== null && <span>R: {rMultiple}</span>}
+              {typeof entry.pnl === "number" && <span>P/L: {formatCurrency(entry.pnl)}</span>}
+            </div>
+          )}
           {(entry.sourceType || typeof entry.followedPlan === "boolean") && (
             <small>
               {[formatJournalSource(entry), typeof entry.followedPlan === "boolean" ? (entry.followedPlan ? "Followed plan" : "Plan deviation") : null]
@@ -2901,6 +2932,9 @@ function JournalList({
             </small>
           )}
           <small>{formatDateTime(entry.createdAt)}</small>
+              </>
+            );
+          })()}
         </article>
       ))}
     </div>
@@ -3324,6 +3358,13 @@ function formatExitReason(reason: NonNullable<TradeJournalEntry["exitReason"]>):
     other: "Other"
   };
   return labels[reason];
+}
+
+function getJournalRMultiple(entry: TradeJournalEntry): number | null {
+  if (entry.status !== "paper_closed" || typeof entry.pnl !== "number" || !entry.entryPrice || !entry.stopLossPrice) return null;
+  const riskPerShare = Math.abs(entry.entryPrice - entry.stopLossPrice);
+  if (!Number.isFinite(riskPerShare) || riskPerShare <= 0) return null;
+  return Math.round((entry.pnl / riskPerShare) * 100) / 100;
 }
 
 function formatStrategyKind(kind: AlgoTradeProposal["strategyKind"]): string {

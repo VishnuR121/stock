@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
-import type { AlgoTradeProposal, DeterministicTradePlan, OpportunityScan, RiskSettings, SignalSnapshot } from "../src/shared/types";
+import type { AlgoTradeProposal, DeterministicTradePlan, OpportunityScan, RiskSettings, SignalSnapshot, TradeJournalEntry } from "../src/shared/types";
 
 describe("dashboard", () => {
   let watchlistPosts: string[];
@@ -9,15 +9,7 @@ describe("dashboard", () => {
   let algoProposals: AlgoTradeProposal[];
   let riskSettings: RiskSettings;
   let riskSettingsPosts: RiskSettings[];
-  let journalEntries: Array<{
-    id: string;
-    symbol: string;
-    createdAt: string;
-    updatedAt: string;
-    status: "watching";
-    action: "watch";
-    notes: string;
-  }>;
+  let journalEntries: TradeJournalEntry[];
 
   beforeEach(() => {
     watchlistPosts = [];
@@ -43,6 +35,22 @@ describe("dashboard", () => {
         status: "watching",
         action: "watch",
         notes: "Delete me"
+      },
+      {
+        id: "journal-closed-test",
+        symbol: "AAPL",
+        createdAt: "2026-05-11T12:00:00.000Z",
+        updatedAt: "2026-05-11T12:00:00.000Z",
+        status: "paper_closed",
+        action: "paper_long_candidate",
+        notes: "Closed from plan.",
+        entryPrice: 100,
+        stopLossPrice: 95,
+        takeProfitPrice: 110,
+        exitPrice: 110,
+        pnl: 10,
+        outcome: "win",
+        exitReason: "target"
       }
     ];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
@@ -245,6 +253,8 @@ describe("dashboard", () => {
     expect(await screen.findByText(/Delete me/)).toBeInTheDocument();
     expect(screen.getByText("Total paper")).toBeInTheDocument();
     expect(screen.getByText("Follow plan")).toBeInTheDocument();
+    expect(screen.getByText("Exit: Target")).toBeInTheDocument();
+    expect(screen.getByText("R: 2")).toBeInTheDocument();
     expect(screen.getByText("Common exit: Stop")).toBeInTheDocument();
     expect(screen.getByText("Common skip: Earnings too close")).toBeInTheDocument();
 
