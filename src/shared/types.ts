@@ -583,9 +583,13 @@ export interface JournalAnalytics {
   winRate: number;
   averageR: number | null;
   totalPnl: number;
+  followedPlanTrades: number;
+  planDeviationTrades: number;
+  followPlanRate: number | null;
   bestTrade: JournalTradeHighlight | null;
   worstTrade: JournalTradeHighlight | null;
   mostCommonSkippedReason: string | null;
+  mostCommonExitReason: JournalExitReason | null;
 }
 
 export interface PaperOrderRequest {

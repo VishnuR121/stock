@@ -6,8 +6,8 @@ describe("journal analytics", () => {
   it("summarizes paper trade outcomes and estimated R multiples", () => {
     const analytics = buildJournalAnalytics([
       makeEntry({ id: "win", symbol: "AAPL", status: "paper_closed", pnl: 300, entryPrice: 100, stopLossPrice: 95, outcome: "win" }),
-      makeEntry({ id: "loss", symbol: "MSFT", status: "paper_closed", pnl: -150, entryPrice: 50, stopLossPrice: 47, outcome: "loss" }),
-      makeEntry({ id: "open", symbol: "SPY", status: "paper_open" }),
+      makeEntry({ id: "loss", symbol: "MSFT", status: "paper_closed", pnl: -150, entryPrice: 50, stopLossPrice: 47, outcome: "loss", followedPlan: false, exitReason: "stop" }),
+      makeEntry({ id: "open", symbol: "SPY", status: "paper_open", followedPlan: true }),
       makeEntry({ id: "skip", symbol: "QQQ", status: "skipped", notes: "Earnings too close" })
     ]);
 
@@ -17,9 +17,13 @@ describe("journal analytics", () => {
     expect(analytics.winRate).toBe(50);
     expect(analytics.averageR).toBe(5);
     expect(analytics.totalPnl).toBe(150);
+    expect(analytics.followedPlanTrades).toBe(1);
+    expect(analytics.planDeviationTrades).toBe(1);
+    expect(analytics.followPlanRate).toBe(50);
     expect(analytics.bestTrade?.symbol).toBe("AAPL");
     expect(analytics.worstTrade?.symbol).toBe("MSFT");
     expect(analytics.mostCommonSkippedReason).toBe("Earnings too close");
+    expect(analytics.mostCommonExitReason).toBe("stop");
   });
 });
 

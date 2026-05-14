@@ -100,9 +100,13 @@ describe("dashboard", () => {
           winRate: 100,
           averageR: 2,
           totalPnl: 250,
+          followedPlanTrades: 1,
+          planDeviationTrades: 1,
+          followPlanRate: 50,
           bestTrade: { id: "best", symbol: "AAPL", pnl: 250, rMultiple: 2 },
           worstTrade: { id: "worst", symbol: "MSFT", pnl: -50, rMultiple: -1 },
-          mostCommonSkippedReason: "Earnings too close"
+          mostCommonSkippedReason: "Earnings too close",
+          mostCommonExitReason: "stop"
         });
       }
       if (target.includes("/api/journal/") && init?.method === "DELETE") {
@@ -202,6 +206,8 @@ describe("dashboard", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Account$/i }));
     expect(await screen.findByText(/Delete me/)).toBeInTheDocument();
     expect(screen.getByText("Total paper")).toBeInTheDocument();
+    expect(screen.getByText("Follow plan")).toBeInTheDocument();
+    expect(screen.getByText("Common exit: Stop")).toBeInTheDocument();
     expect(screen.getByText("Common skip: Earnings too close")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Delete SPY journal entry/i }));

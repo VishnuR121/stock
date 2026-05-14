@@ -1,8 +1,45 @@
 # Alpaca Paper Trading Research Copilot
 
-Local swing-trading research dashboard with Alpaca paper trading, OpenAI trade-plan summaries, technical scans, and analyze-only options views.
+AI-assisted swing trading research and paper-trading copilot for stocks and ETFs.
 
-This is a research and paper-trading tool. It does not include live-money trading, automated trading, or options order placement.
+The app scans a watchlist or stock/ETF universe, ranks setups, explains market regime, builds deterministic risk-managed trade plans, lets AI explain those plans, runs historical backtests, places Alpaca paper bracket orders, and tracks journal outcomes.
+
+This is an educational research and paper-trading tool. It is not financial advice. It does not support live-money trading, autonomous trading, crypto leverage, 0DTE workflows, or options order placement.
+
+## Current Capabilities
+
+- Watchlist scanning with technical indicators and setup scores.
+- Market regime classifier using SPY and QQQ.
+- Transparent ranking model with trend, momentum, risk/reward, volume, volatility, RSI, and regime adjustments.
+- Deterministic quantitative trade plan with entry zone, stop, targets, position size, max risk, invalidation, reasons, risks, and warnings.
+- AI plan explanation through OpenAI or Anthropic-style providers, constrained to the deterministic quantitative plan.
+- Decision Center analysis from deterministic specialist reports plus a manager synthesis.
+- Backtest v1 for long-only swing setups, including SPY benchmark comparison and optional historical market-regime filters.
+- Alpaca paper-only bracket order flow with stop loss, take profit, event check, risk acceptance, paper-only confirmation, validation, and kill switch.
+- Paper trade journal, saved plans, analysis runs, position monitoring, and journal analytics.
+- Options research views for education and comparison only.
+- Local JSON storage by default, with optional Postgres/Supabase storage through Drizzle.
+
+## Safety Boundaries
+
+- Alpaca live trading URLs are rejected server-side.
+- Paper mode is the only execution mode.
+- Paper orders require stop loss, take profit, paper-only confirmation, risk acceptance, and earnings/event confirmation.
+- The kill switch blocks paper order submission while enabled.
+- AI explains structured quantitative inputs; it must not invent a different trade or override risk controls.
+- Backtests can be misleading and do not predict future returns.
+- Past performance does not guarantee future results.
+- Options are analyze-only: no options orders, no 0DTE workflow, no naked options, and no AI-selected options execution.
+- TradingView webhook alerts are review-only signal inputs and never submit orders directly.
+
+## Main Workspaces
+
+- **Overview:** market regime, paper account status, risk controls, opportunities, open positions, and warnings.
+- **Research:** watchlist scans, opportunity scan, ranked setups, symbol detail, quant plan, Decision Center, AI plan, context, and options research.
+- **Backtests:** historical strategy test, market-regime filters, summary metrics, equity curve table, trade table, and SPY comparison.
+- **Algo:** approval queue for paper-trade proposals. Options proposals remain research-only.
+- **Positions / Orders:** paper positions, paper orders, position monitor, close/flatten controls, and safety controls.
+- **Account / Journal:** account details, trade journal, paper-trade analytics, follow-plan rate, common exits, and skipped reasons.
 
 ## Setup
 
@@ -18,8 +55,11 @@ This is a research and paper-trading tool. It does not include live-money tradin
    ALPACA_API_KEY_ID=
    ALPACA_API_SECRET_KEY=
    ALPACA_PAPER_BASE_URL=https://paper-api.alpaca.markets
+   AI_PROVIDER=openai
    OPENAI_API_KEY=
    OPENAI_MODEL=gpt-5.4-mini
+   ANTHROPIC_API_KEY=
+   ANTHROPIC_MODEL=claude-sonnet-4-6
    ALPHA_VANTAGE_API_KEY=
    SEC_USER_AGENT=ResearchCopilot/0.1 your-email@example.com
    DATABASE_URL=
@@ -28,35 +68,15 @@ This is a research and paper-trading tool. It does not include live-money tradin
    PORT=3001
    ```
 
-   `ALPHA_VANTAGE_API_KEY` is optional. Without it, AI plans still work but will not include Alpha Vantage earnings, fundamentals, or news context. `SEC_USER_AGENT` is used for free SEC EDGAR requests; set it to something that identifies your local app and contact email.
-   `DATABASE_URL` is optional. If it is empty, the app uses `data/app-data.json`. If it is set to a Postgres/Supabase URL, the Node server stores watchlists, scans, cached AI context, AI plans, Decision Center analyses, TradingView signals, settings, and journal entries in Postgres.
-   `TRADINGVIEW_WEBHOOK_SECRET` is optional. Set it before using `/api/tradingview/webhook`; TradingView alerts are saved as review-only signals and never place orders directly.
+   `AI_PROVIDER` can be `openai` or `anthropic`. Configure the matching API key and model.
 
-### Optional Supabase/Postgres Storage
+   `ALPHA_VANTAGE_API_KEY` is optional. Without it, AI and Decision Center flows still work but have less fundamentals, earnings, and news context.
 
-Keep the database private on the server. Do not put Supabase keys or database URLs in frontend code.
+   `SEC_USER_AGENT` is used for free SEC EDGAR requests. Set it to identify your local app and contact email.
 
-1. Create a Supabase project.
-2. Copy a Postgres connection string into `.env.local` as `DATABASE_URL`.
-3. Push the schema:
+   `DATABASE_URL` is optional. If it is empty, the app uses `data/app-data.json`. If it is set to a Postgres/Supabase URL, the Node server stores watchlists, scans, cached context, AI plans, Decision Center analyses, TradingView signals, settings, and journal entries in Postgres.
 
-   ```bash
-   npm run db:push
-   ```
-
-4. Import any existing local JSON data:
-
-   ```bash
-   npm run db:import-json
-   ```
-
-Useful database commands:
-
-```bash
-npm run db:generate
-npm run db:push
-npm run db:studio
-```
+   `TRADINGVIEW_WEBHOOK_SECRET` is optional. Set it before using `/api/tradingview/webhook`.
 
 3. Start the app:
 
@@ -70,19 +90,65 @@ npm run db:studio
    http://127.0.0.1:5173
    ```
 
-## Safety Boundaries
+## Optional Supabase/Postgres Storage
 
-- Alpaca live trading URLs are rejected.
-- Paper order route only submits long stock/ETF bracket orders.
-- Stop loss, take profit, paper-only confirmation, risk acceptance, and earnings/event check are required.
-- Options are analyze-only in v1.
-- Decision Center analyses use deterministic specialist reports plus one manager synthesis; hard safety blockers take priority.
-- The kill switch blocks paper order submission while enabled.
-- TradingView webhook alerts are optional signal inputs only; they never submit orders.
-- AI plans can include optional Alpha Vantage context and free SEC EDGAR filings/facts.
-- AI plans, Decision Center analyses, cached API context, scans, settings, TradingView signals, and journal entries are saved in Postgres when `DATABASE_URL` is set, otherwise in `data/app-data.json`.
+Keep the database private on the server. Do not put Supabase keys or database URLs in frontend code.
+
+1. Create a Supabase project or another Postgres database.
+2. Copy the Postgres connection string into `.env.local` as `DATABASE_URL`.
+3. Push the schema when setting up a fresh database:
+
+   ```bash
+   npm run db:push
+   ```
+
+4. Import existing local JSON data if needed:
+
+   ```bash
+   npm run db:import-json
+   ```
+
+Useful database commands:
+
+```bash
+npm run db:generate
+npm run db:push
+npm run db:studio
+```
+
+Note: newer journal source metadata is currently preserved in JSON storage. Postgres remains compatible with the existing journal table; add a deliberate migration before persisting those extra metadata fields in Postgres columns.
+
+## Backtesting Notes
+
+Backtest v1 is intentionally simple and conservative:
+
+- Uses historical bars only.
+- Builds signals from data available up to each decision date.
+- Enters on the next bar after the signal date.
+- Exits on stop, target, holding period, score drop, bearish market regime, or end of data.
+- Compares strategy results against SPY buy-and-hold.
+- Supports optional market-regime filters using historical SPY and QQQ data.
+
+Backtests are research tools. They can be affected by data quality, survivorship bias, assumptions about fills, and changing market conditions.
+
+## Options Policy
+
+Allowed:
+
+- Options idea display.
+- Breakeven, max loss, probability, and liquidity education.
+- Covered call, cash-secured put, long option, and debit spread research.
+
+Not allowed:
+
+- Options order placement.
+- 0DTE or weekly YOLO workflows.
+- Naked options.
+- AI-selected options execution.
 
 ## Verification
+
+Run these before finishing a phase:
 
 ```bash
 npm test

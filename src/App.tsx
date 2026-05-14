@@ -2609,10 +2609,19 @@ function JournalAnalyticsSummary({ analytics }: { analytics: JournalAnalytics | 
         <span>Skipped</span>
         <strong>{analytics.skippedTrades}</strong>
       </div>
-      {(analytics.bestTrade || analytics.worstTrade || analytics.mostCommonSkippedReason) && (
+      <div>
+        <span>Follow plan</span>
+        <strong>{analytics.followPlanRate === null ? "--" : formatPctPoints(analytics.followPlanRate)}</strong>
+      </div>
+      <div>
+        <span>Deviations</span>
+        <strong>{analytics.planDeviationTrades}</strong>
+      </div>
+      {(analytics.bestTrade || analytics.worstTrade || analytics.mostCommonSkippedReason || analytics.mostCommonExitReason) && (
         <div className="journalInsight">
           {analytics.bestTrade && <p>Best: {analytics.bestTrade.symbol} {formatCurrency(analytics.bestTrade.pnl)}</p>}
           {analytics.worstTrade && <p>Worst: {analytics.worstTrade.symbol} {formatCurrency(analytics.worstTrade.pnl)}</p>}
+          {analytics.mostCommonExitReason && <p>Common exit: {formatExitReason(analytics.mostCommonExitReason)}</p>}
           {analytics.mostCommonSkippedReason && <p>Common skip: {analytics.mostCommonSkippedReason}</p>}
         </div>
       )}
@@ -2967,6 +2976,18 @@ function formatJournalSource(entry: TradeJournalEntry): string | null {
     paper_order: "Paper order"
   };
   return entry.sourceId ? `${labels[entry.sourceType]} ${entry.sourceId}` : labels[entry.sourceType];
+}
+
+function formatExitReason(reason: NonNullable<TradeJournalEntry["exitReason"]>): string {
+  const labels: Record<NonNullable<TradeJournalEntry["exitReason"]>, string> = {
+    target: "Target",
+    stop: "Stop",
+    manual: "Manual",
+    time_exit: "Time exit",
+    score_drop: "Score drop",
+    other: "Other"
+  };
+  return labels[reason];
 }
 
 function formatStrategyKind(kind: AlgoTradeProposal["strategyKind"]): string {
