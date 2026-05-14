@@ -2,6 +2,7 @@
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../server/app";
+import { DEFAULT_SEC_USER_AGENT } from "../server/config";
 import type { SignalSnapshot } from "../src/shared/types";
 
 describe("API safety behavior", () => {
@@ -63,6 +64,32 @@ describe("API safety behavior", () => {
     expect(JSON.stringify(response.body)).not.toContain("openai-secret");
     expect(JSON.stringify(response.body)).not.toContain("alpha-secret");
     expect(JSON.stringify(response.body)).not.toContain("webhook-secret");
+  });
+
+  it("reports the placeholder SEC user agent as unconfigured", async () => {
+    const app = createApp({
+      secUserAgent: DEFAULT_SEC_USER_AGENT,
+      databaseUrl: undefined,
+      dataFilePath: `data/test-sec-health-${Date.now()}.json`
+    });
+
+    const response = await request(app).get("/api/health").expect(200);
+    expect(response.body.secUserAgentConfigured).toBe(false);
+  });
+
+  it("skips SEC requests when SEC_USER_AGENT is not configured", async () => {
+    const fetchSpy = vi.spyOn(global, "fetch");
+    const app = createApp({
+      alphaVantageApiKey: undefined,
+      secUserAgent: DEFAULT_SEC_USER_AGENT,
+      databaseUrl: undefined,
+      dataFilePath: `data/test-context-sec-missing-${Date.now()}.json`
+    });
+
+    const response = await request(app).get("/api/context/AAPL").expect(200);
+    expect(response.body.providers.sec).toBe("missing_user_agent");
+    expect(response.body.contextWarnings).toContain("SEC_USER_AGENT is not configured; SEC filings and company facts were not added.");
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("blocks account calls when the Alpaca URL is not paper", async () => {

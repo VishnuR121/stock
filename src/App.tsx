@@ -71,7 +71,7 @@ type BeginnerAction = {
 };
 type ThemeMode = "light" | "dark";
 type AnalysisView = "decision" | "plan";
-type WorkspaceView = "overview" | "research" | "trade-plan" | "backtests" | "algo" | "positions" | "orders" | "journal" | "account" | "settings";
+type WorkspaceView = "overview" | "research" | "trade-plan" | "backtests" | "algo" | "positions" | "orders" | "journal" | "settings";
 type AlgoQueueFilter = "active" | "selected" | "all" | "history";
 type JournalFilter = "all" | "watching" | "paper_open" | "paper_closed" | "skipped";
 
@@ -976,21 +976,6 @@ export function App() {
     </section>
   );
 
-  const accountPanel = (
-    <section className="panel compactPanel">
-      <details className="collapseBlock" open>
-        <summary>
-          <Activity size={16} />
-          <span>Paper account</span>
-          <ChevronDown className="summaryChevron" size={16} />
-        </summary>
-        <div className="collapseBody">
-          <AccountPanel account={account} positions={positions} />
-        </div>
-      </details>
-    </section>
-  );
-
   const journalPanel = (
     <section className="panel compactPanel">
       <div className="panelTitle">
@@ -1003,67 +988,72 @@ export function App() {
     </section>
   );
 
-  const dataStatusPanel = (
-    <section className="panel compactPanel">
-      <div className="panelTitle">
-        <Settings size={18} />
-        <h2>API + data status</h2>
+  const settingsOverviewPanel = (
+    <section className="panel compactPanel settingsOverviewPanel">
+      <div className="panelTitle spaced settingsHeader">
+        <div>
+          <h2>Settings</h2>
+          <p>Paper account, provider status, and local preferences.</p>
+        </div>
+        <button
+          className="textButton secondary"
+          onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+          type="button"
+        >
+          {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+          <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
+        </button>
       </div>
-      <section className="statusGrid settingsStatusGrid">
-        <StatusTile
-          icon={<ShieldCheck size={20} />}
-          label="Broker"
-          value={formatBrokerStatus(health)}
-          detail={health?.alpacaPaperOnly ? "Paper endpoint only" : "Live URL rejected"}
-          tone={health?.alpacaConfigured && health.alpacaPaperOnly ? "good" : "warn"}
-        />
-        <StatusTile
-          icon={<Bot size={20} />}
-          label="AI"
-          value={health?.aiConfigured ? formatAiProvider(health.aiProvider) : `${formatAiProvider(health?.aiProvider)} needs key`}
-          detail={health?.aiConfigured ? health.aiModel : "Deterministic plans still work"}
-          tone={health?.aiConfigured ? "good" : "warn"}
-        />
-        <StatusTile
-          icon={<Search size={20} />}
-          label="Context"
-          value={formatContextProviderStatus(health)}
-          detail={health?.secUserAgentConfigured ? "SEC configured" : "SEC user agent missing"}
-          tone={health?.alphaVantageConfigured || health?.secUserAgentConfigured ? "neutral" : "warn"}
-        />
-        <StatusTile
-          icon={<Settings size={20} />}
-          label="Storage"
-          value={health?.databaseConfigured ? "Postgres" : "Local JSON"}
-          detail={health ? formatDataStore(health.dataStore) : undefined}
-          tone="neutral"
-        />
-      </section>
+      <div className="settingsOverviewGrid">
+        <section className="settingsGroup" aria-label="Paper account">
+          <div className="settingsGroupTitle">
+            <CircleDollarSign size={17} />
+            <h3>Paper account</h3>
+          </div>
+          <AccountPanel account={account} positions={positions} />
+        </section>
+        <section className="settingsGroup" aria-label="API and data status">
+          <div className="settingsGroupTitle">
+            <Settings size={17} />
+            <h3>API + data status</h3>
+          </div>
+          <section className="statusGrid settingsStatusGrid">
+            <StatusTile
+              icon={<ShieldCheck size={20} />}
+              label="Broker"
+              value={formatBrokerStatus(health)}
+              detail={health?.alpacaPaperOnly ? "Paper endpoint only" : "Live URL rejected"}
+              tone={health?.alpacaConfigured && health.alpacaPaperOnly ? "good" : "warn"}
+            />
+            <StatusTile
+              icon={<Bot size={20} />}
+              label="AI"
+              value={health?.aiConfigured ? formatAiProvider(health.aiProvider) : `${formatAiProvider(health?.aiProvider)} needs key`}
+              detail={health?.aiConfigured ? health.aiModel : "Deterministic plans still work"}
+              tone={health?.aiConfigured ? "good" : "warn"}
+            />
+            <StatusTile
+              icon={<Search size={20} />}
+              label="Context"
+              value={formatContextProviderStatus(health)}
+              detail={health?.secUserAgentConfigured ? "SEC configured" : "SEC user agent missing"}
+              tone={health?.alphaVantageConfigured || health?.secUserAgentConfigured ? "neutral" : "warn"}
+            />
+            <StatusTile
+              icon={<Settings size={20} />}
+              label="Storage"
+              value={health?.databaseConfigured ? "Postgres" : "Local JSON"}
+              detail={health ? formatDataStore(health.dataStore) : undefined}
+              tone="neutral"
+            />
+          </section>
+        </section>
+      </div>
     </section>
   );
 
   return (
     <main className="shell">
-      <section className="topbar" aria-label="Workspace status">
-        <div>
-          <p className="eyebrow">Alpaca paper</p>
-          <h1>Research Copilot</h1>
-        </div>
-        <div className="topbarActions">
-          <button
-            className="iconButton"
-            onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-          >
-            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-          <button className="iconButton" onClick={refreshBasics} title="Refresh status" aria-label="Refresh status">
-            {busy === "refresh" ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
-          </button>
-        </div>
-      </section>
-
       {message && (
         <div className="notice" role="status">
           <AlertTriangle size={18} />
@@ -1073,67 +1063,6 @@ export function App() {
 
       <section className="workspace">
         <aside className="leftRail">
-          <section className="panel compactPanel statusCard">
-            <details className="collapseBlock statusCollapse">
-              <summary>
-                <ShieldCheck size={16} />
-                <span>System status</span>
-                <ChevronDown className="summaryChevron" size={16} />
-              </summary>
-              <div className="collapseBody">
-                <section className="statusGrid">
-                  <StatusTile
-                    icon={<ShieldCheck size={20} />}
-                    label="Broker"
-                    value={formatBrokerStatus(health)}
-                    detail={health?.alpacaPaperOnly ? "Alpaca paper endpoint" : "Live URL blocked"}
-                    tone={health?.alpacaConfigured && health.alpacaPaperOnly ? "good" : "warn"}
-                  />
-                  <StatusTile
-                    icon={<ShieldCheck size={20} />}
-                    label="Execution"
-                    value={health?.paperTradingBlockedReasons?.length ? "Blocked" : "Paper only"}
-                    detail={health?.paperTradingBlockedReasons?.[0] ?? "Manual confirmation required"}
-                    tone={health?.paperTradingBlockedReasons?.length ? "warn" : "good"}
-                  />
-                  <StatusTile
-                    icon={<Bot size={20} />}
-                    label="AI Provider"
-                    value={health?.aiConfigured ? formatAiProvider(health.aiProvider) : `${formatAiProvider(health?.aiProvider)} needs key`}
-                    detail={health?.aiConfigured ? health.aiModel : undefined}
-                    tone={health?.aiConfigured ? "good" : "warn"}
-                  />
-                  <StatusTile
-                    icon={<Search size={20} />}
-                    label="Context data"
-                    value={formatContextProviderStatus(health)}
-                    detail={health?.secUserAgentConfigured ? "SEC user agent set" : "Set SEC_USER_AGENT"}
-                    tone={health?.alphaVantageConfigured || health?.secUserAgentConfigured ? "neutral" : "warn"}
-                  />
-                  <StatusTile
-                    icon={<Settings size={20} />}
-                    label="Data store"
-                    value={health?.databaseConfigured ? "Postgres" : "Local JSON"}
-                    detail={health ? formatDataStore(health.dataStore) : undefined}
-                    tone="neutral"
-                  />
-                  <StatusTile
-                    icon={<CircleDollarSign size={20} />}
-                    label="Equity"
-                    value={formatCurrency(account?.equity)}
-                    tone="neutral"
-                  />
-                  <StatusTile
-                    icon={<Activity size={20} />}
-                    label="Positions"
-                    value={positions ? String(positions.positions.length) : "Offline"}
-                    tone={positions ? "neutral" : "warn"}
-                  />
-                </section>
-              </div>
-            </details>
-          </section>
-
           <section className="panel sidebar">
             <div className="panelTitle">
               <LineChart size={18} />
@@ -1284,23 +1213,17 @@ export function App() {
             </div>
           )}
 
-          {workspaceView === "account" && (
-            <div className="tabSurface accountSurface">
-              {accountPanel}
-            </div>
-          )}
-
           {workspaceView === "settings" && (
             <div className="tabSurface settingsSurface">
-              <div className="accountStack">
+              {settingsOverviewPanel}
+              <div className="settingsControlsGrid">
                 <RiskSettingsPanel
                   riskSettings={riskSettings}
                   busy={busy === "risk-settings"}
                   onSave={saveRiskSettings}
                 />
-                {dataStatusPanel}
+                {safetyPanel}
               </div>
-              {safetyPanel}
             </div>
           )}
 
@@ -1390,7 +1313,6 @@ function WorkspaceTabs({
     { view: "positions", label: "Positions", icon: <LineChart size={16} /> },
     { view: "orders", label: "Orders", icon: <ClipboardCheck size={16} /> },
     { view: "journal", label: "Journal", icon: <ClipboardCheck size={16} /> },
-    { view: "account", label: "Account", icon: <CircleDollarSign size={16} /> },
     { view: "settings", label: "Settings", icon: <Settings size={16} /> }
   ];
 
@@ -2855,8 +2777,8 @@ function ContextPanel({ context }: { context?: TradeContext }) {
   }
 
   const providerText = [
-    `Alpha Vantage: ${context.providers.alphaVantage}`,
-    `SEC: ${context.providers.sec}`
+    `Alpha Vantage: ${formatProviderStatus(context.providers.alphaVantage)}`,
+    `SEC: ${formatProviderStatus(context.providers.sec)}`
   ].join(" / ");
 
   return (
@@ -3372,6 +3294,10 @@ function formatContextProviderStatus(health: HealthStatus | null): string {
   if (health.alphaVantageConfigured && health.secUserAgentConfigured) return "Full";
   if (health.alphaVantageConfigured || health.secUserAgentConfigured) return "Partial";
   return "Limited";
+}
+
+function formatProviderStatus(status: string): string {
+  return status.replaceAll("_", " ");
 }
 
 function formatDataStore(value: string): string {

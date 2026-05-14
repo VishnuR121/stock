@@ -7,7 +7,7 @@ import { buildAnalysisRun, buildFallbackManagerVerdict, buildSafetyBlockers, bui
 import { runBacktest } from "./backtest";
 import { buildJournalAnalytics } from "./journalAnalytics";
 import { createTradePlanner } from "./ai";
-import { getConfig, isPaperAlpacaUrl, type AppConfig } from "./config";
+import { getConfig, isConfiguredSecUserAgent, isPaperAlpacaUrl, type AppConfig } from "./config";
 import { TradeContextService } from "./context";
 import { buildSignalSnapshot, getDefaultRiskProfile } from "./indicators";
 import { buildMarketRegimeSnapshot } from "./marketRegime";
@@ -765,10 +765,6 @@ function getPaperTradingBlockedReasons(input: {
   if (!input.alpacaConfigured) reasons.push("Alpaca paper credentials are missing.");
   if (input.killSwitchEnabled) reasons.push("Paper order kill switch is enabled.");
   return reasons;
-}
-
-function isConfiguredSecUserAgent(userAgent: string): boolean {
-  return Boolean(userAgent.trim()) && userAgent !== "ResearchCopilot/0.1 contact@example.com";
 }
 
 async function safeAccount(alpaca: AlpacaClient) {

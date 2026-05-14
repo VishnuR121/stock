@@ -259,7 +259,7 @@ export interface TradeContext {
   providers: {
     alpaca: "ok" | "missing" | "error";
     alphaVantage: "ok" | "missing_key" | "rate_limited" | "error";
-    sec: "ok" | "not_found" | "error";
+    sec: "ok" | "missing_user_agent" | "not_found" | "error";
   };
   fundamentals?: FundamentalSnapshot;
   earnings?: EarningsContext;

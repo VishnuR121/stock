@@ -6,6 +6,7 @@ dotenv.config();
 const DEFAULT_PAPER_BASE_URL = "https://paper-api.alpaca.markets";
 const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
+export const DEFAULT_SEC_USER_AGENT = "ResearchCopilot/0.1 contact@example.com";
 
 export type AiProvider = "openai" | "anthropic";
 
@@ -38,7 +39,7 @@ export function getConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,
     anthropicModel: process.env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL,
     alphaVantageApiKey: process.env.ALPHA_VANTAGE_API_KEY,
-    secUserAgent: process.env.SEC_USER_AGENT || "ResearchCopilot/0.1 contact@example.com",
+    secUserAgent: process.env.SEC_USER_AGENT || DEFAULT_SEC_USER_AGENT,
     databaseUrl: process.env.DATABASE_URL,
     dataFilePath: process.env.DATA_FILE_PATH || "data/app-data.json",
     tradingViewWebhookSecret: process.env.TRADINGVIEW_WEBHOOK_SECRET,
@@ -57,4 +58,8 @@ export function isPaperAlpacaUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+export function isConfiguredSecUserAgent(userAgent: string): boolean {
+  return Boolean(userAgent.trim()) && userAgent !== DEFAULT_SEC_USER_AGENT;
 }

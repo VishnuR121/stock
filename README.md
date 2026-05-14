@@ -41,7 +41,7 @@ This is an educational research and paper-trading tool. It is not financial advi
 - **Algo:** approval queue for paper-trade proposals. Options proposals remain research-only.
 - **Positions / Orders:** paper positions, paper orders, position monitor, close/flatten controls, and safety controls.
 - **Journal:** filterable watching, open, closed, and skipped journal entries with paper-trade analytics.
-- **Account / Settings:** paper account details, risk controls, kill switch, and API/data-provider status.
+- **Settings:** paper account details, appearance, risk controls, kill switch, and API/data-provider status.
 
 ## Setup
 
@@ -74,7 +74,7 @@ This is an educational research and paper-trading tool. It is not financial advi
 
    `ALPHA_VANTAGE_API_KEY` is optional. Without it, AI and Decision Center flows still work but have less fundamentals, earnings, and news context.
 
-   `SEC_USER_AGENT` is used for free SEC EDGAR requests. Set it to identify your local app and contact email.
+   `SEC_USER_AGENT` is used for free SEC EDGAR requests. Set it to identify your local app and contact email. If it is omitted, SEC filings and company facts are skipped instead of using a placeholder identity.
 
    `DATABASE_URL` is optional. If it is empty, the app uses `data/app-data.json`. If it is set to a Postgres/Supabase URL, the Node server stores watchlists, scans, cached context, AI plans, Decision Center analyses, TradingView signals, settings, and journal entries in Postgres.
 

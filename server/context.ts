@@ -6,7 +6,7 @@ import type {
   SecCompanyFacts,
   TradeContext
 } from "../src/shared/types";
-import type { AppConfig } from "./config";
+import { isConfiguredSecUserAgent, type AppConfig } from "./config";
 
 type ProviderStatus = TradeContext["providers"];
 
@@ -85,7 +85,7 @@ export class TradeContextService {
       providers: {
         alpaca: "ok",
         alphaVantage: this.config.alphaVantageApiKey ? "ok" : "missing_key",
-        sec: "ok"
+        sec: isConfiguredSecUserAgent(this.config.secUserAgent) ? "ok" : "missing_user_agent"
       },
       news: [],
       recentFilings: [],
@@ -160,6 +160,14 @@ export class TradeContextService {
     secFacts?: SecCompanyFacts;
     warnings: string[];
   }> {
+    if (!isConfiguredSecUserAgent(this.config.secUserAgent)) {
+      return {
+        status: "missing_user_agent",
+        recentFilings: [],
+        warnings: ["SEC_USER_AGENT is not configured; SEC filings and company facts were not added."]
+      };
+    }
+
     try {
       const cik = await this.lookupCik(symbol);
       if (!cik) {

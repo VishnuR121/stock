@@ -155,7 +155,6 @@ describe("dashboard", () => {
   it("renders the operating dashboard", async () => {
     render(<App />);
 
-    expect(await screen.findByText("Research Copilot")).toBeInTheDocument();
     expect((await screen.findAllByText("SPY")).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /^Overview$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Research$/i })).toBeInTheDocument();
@@ -167,10 +166,6 @@ describe("dashboard", () => {
     expect(screen.getByText("Today")).toBeInTheDocument();
     expect(await screen.findByText("Market regime")).toBeInTheDocument();
     expect(screen.getByText("Bullish")).toBeInTheDocument();
-    expect(screen.getByText("Blocked")).toBeInTheDocument();
-    expect(screen.getByText("Alpaca paper endpoint")).toBeInTheDocument();
-    expect(screen.getByText("Local JSON")).toBeInTheDocument();
-    expect(screen.getByText("Limited")).toBeInTheDocument();
     expect(screen.getAllByText("Run scan").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: /^Research$/i }));
@@ -178,7 +173,7 @@ describe("dashboard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Trade Plan$/i }));
     expect(screen.getByText("Paper order")).toBeInTheDocument();
-    expect(screen.getByText("Quant plan")).toBeInTheDocument();
+    expect(screen.getByText("No signal loaded")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /^Algo$/i }));
     expect(screen.getByText("Algo Command Center")).toBeInTheDocument();
