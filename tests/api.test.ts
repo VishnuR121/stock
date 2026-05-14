@@ -380,6 +380,51 @@ describe("API safety behavior", () => {
     expect(journal.body).toEqual([]);
   });
 
+  it("updates journal review fields without creating a new entry", async () => {
+    const app = createApp({
+      dataFilePath: `data/test-journal-update-${Date.now()}.json`,
+      databaseUrl: undefined
+    });
+
+    const created = await request(app)
+      .post("/api/journal")
+      .send({
+        symbol: "SPY",
+        status: "paper_open",
+        action: "paper_long_candidate",
+        notes: "Opened from plan.",
+        followedPlan: true,
+        outcome: "open"
+      })
+      .expect(200);
+
+    const updated = await request(app)
+      .patch(`/api/journal/${created.body.id}`)
+      .send({
+        status: "paper_closed",
+        notes: "Closed after review.",
+        followedPlan: false,
+        exitReason: "score_drop",
+        outcome: "loss",
+        pnl: -42.5
+      })
+      .expect(200);
+
+    expect(updated.body).toMatchObject({
+      id: created.body.id,
+      status: "paper_closed",
+      notes: "Closed after review.",
+      followedPlan: false,
+      exitReason: "score_drop",
+      outcome: "loss",
+      pnl: -42.5
+    });
+
+    const journal = await request(app).get("/api/journal").expect(200);
+    expect(journal.body).toHaveLength(1);
+    expect(journal.body[0].id).toBe(created.body.id);
+  });
+
   it("returns journal analytics from stored journal entries", async () => {
     const app = createApp({
       dataFilePath: `data/test-journal-analytics-${Date.now()}.json`,

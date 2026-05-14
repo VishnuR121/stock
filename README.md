@@ -97,17 +97,15 @@ Keep the database private on the server. Do not put Supabase keys or database UR
 
 1. Create a Supabase project or another Postgres database.
 2. Copy the Postgres connection string into `.env.local` as `DATABASE_URL`.
-3. Push the schema when setting up a fresh database:
+3. Apply database migrations:
 
    ```bash
-   npm run db:push
+   npm run db:migrate
    ```
 
-   If `drizzle-kit push` fails while introspecting your database, apply the current journal metadata migration directly:
+   `npm run db:migrate` applies the SQL files in `drizzle/` and tracks completed migrations in the database. It avoids the `drizzle-kit push` introspection path that can fail on some hosted Postgres schemas.
 
-   ```bash
-   npm run db:migrate:journal
-   ```
+   `npm run db:push` remains available as a Drizzle development convenience, but migrations are the recommended path.
 
 4. Import existing local JSON data once if needed:
 
@@ -119,8 +117,8 @@ Useful database commands:
 
 ```bash
 npm run db:generate
+npm run db:migrate
 npm run db:push
-npm run db:migrate:journal
 npm run db:studio
 ```
 

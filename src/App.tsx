@@ -74,6 +74,18 @@ type AnalysisView = "decision" | "plan";
 type WorkspaceView = "overview" | "research" | "trade-plan" | "backtests" | "algo" | "positions" | "orders" | "journal" | "settings";
 type AlgoQueueFilter = "active" | "selected" | "all" | "history";
 type JournalFilter = "all" | "watching" | "paper_open" | "paper_closed" | "skipped";
+type JournalUpdatePatch = Partial<Pick<
+  TradeJournalEntry,
+  "status" | "action" | "notes" | "followedPlan" | "exitReason" | "outcome" | "entryPrice" | "exitPrice" | "stopLossPrice" | "takeProfitPrice" | "pnl"
+>>;
+type JournalDraft = {
+  status: TradeJournalEntry["status"];
+  followedPlan: "" | "yes" | "no";
+  exitReason: "" | NonNullable<TradeJournalEntry["exitReason"]>;
+  outcome: "" | NonNullable<TradeJournalEntry["outcome"]>;
+  pnl: string;
+  notes: string;
+};
 
 type BacktestForm = {
   symbols: string;
@@ -614,7 +626,26 @@ export function App() {
         method: "DELETE"
       });
       setJournal((current) => current.filter((item) => item.id !== entry.id));
+      setJournalAnalytics(await api<JournalAnalytics>("/api/journal/analytics"));
       setMessage(`${entry.symbol} journal entry deleted.`);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function updateJournalEntry(entry: TradeJournalEntry, patch: JournalUpdatePatch) {
+    setBusy(`journal-update-${entry.id}`);
+    setMessage(null);
+    try {
+      const updated = await api<TradeJournalEntry>(`/api/journal/${entry.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch)
+      });
+      setJournal((current) => current.map((item) => item.id === entry.id ? updated : item));
+      setJournalAnalytics(await api<JournalAnalytics>("/api/journal/analytics"));
+      setMessage(`${entry.symbol} journal entry updated.`);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -984,7 +1015,7 @@ export function App() {
       </div>
       <JournalAnalyticsSummary analytics={journalAnalytics} />
       <JournalFilterTabs filter={journalFilter} counts={journalCounts} onChange={setJournalFilter} />
-      <JournalList journal={filteredJournal} busy={busy} onDelete={deleteJournalEntry} />
+      <JournalList journal={filteredJournal} busy={busy} onDelete={deleteJournalEntry} onUpdate={updateJournalEntry} />
     </section>
   );
 
@@ -1652,10 +1683,18 @@ function BacktestsPanel({
           <h2>Backtests</h2>
           <p>Long-only swing test using historical bars. Signals use only past data and enter on the next bar.</p>
         </div>
-        <button className="textButton" onClick={onRun} disabled={busy === "backtest"}>
-          {busy === "backtest" ? <Loader2 className="spin" size={17} /> : <BarChart3 size={17} />}
-          <span>Run backtest</span>
-        </button>
+        <div className="panelActions">
+          {result && (
+            <button className="textButton secondary" onClick={() => exportBacktestCsv(result)} type="button">
+              <Save size={17} />
+              <span>Export CSV</span>
+            </button>
+          )}
+          <button className="textButton" onClick={onRun} disabled={busy === "backtest"}>
+            {busy === "backtest" ? <Loader2 className="spin" size={17} /> : <BarChart3 size={17} />}
+            <span>Run backtest</span>
+          </button>
+        </div>
       </div>
 
       <div className="backtestForm">
@@ -2916,57 +2955,148 @@ function JournalFilterTabs({
 function JournalList({
   journal,
   busy,
-  onDelete
+  onDelete,
+  onUpdate
 }: {
   journal: TradeJournalEntry[];
   busy: string | null;
   onDelete: (entry: TradeJournalEntry) => void;
+  onUpdate: (entry: TradeJournalEntry, patch: JournalUpdatePatch) => void;
 }) {
   if (!journal.length) return <EmptyState text="No journal entries yet" />;
 
   return (
     <div className="journalList">
       {journal.map((entry) => (
-        <article key={entry.id}>
-          {(() => {
-            const rMultiple = getJournalRMultiple(entry);
-            return (
-              <>
-          <div className="journalTopline">
-            <strong>{entry.symbol}</strong>
-            <span>{entry.status.replace("_", " ")}</span>
-            <button
-              className="iconButton danger"
-              onClick={() => onDelete(entry)}
-              disabled={busy === `journal-delete-${entry.id}`}
-              title="Delete journal entry"
-              aria-label={`Delete ${entry.symbol} journal entry`}
-            >
-              {busy === `journal-delete-${entry.id}` ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
-            </button>
-          </div>
-          <p>{formatAction(entry.action)} - {entry.notes || "No notes"}</p>
-          {entry.status === "paper_closed" && (
-            <div className="journalMeta">
-              {entry.exitReason && <span>Exit: {formatExitReason(entry.exitReason)}</span>}
-              {rMultiple !== null && <span>R: {rMultiple}</span>}
-              {typeof entry.pnl === "number" && <span>P/L: {formatCurrency(entry.pnl)}</span>}
-            </div>
-          )}
-          {(entry.sourceType || typeof entry.followedPlan === "boolean") && (
-            <small>
-              {[formatJournalSource(entry), typeof entry.followedPlan === "boolean" ? (entry.followedPlan ? "Followed plan" : "Plan deviation") : null]
-                .filter(Boolean)
-                .join(" - ")}
-            </small>
-          )}
-          <small>{formatDateTime(entry.createdAt)}</small>
-              </>
-            );
-          })()}
-        </article>
+        <JournalEntryCard key={entry.id} entry={entry} busy={busy} onDelete={onDelete} onUpdate={onUpdate} />
       ))}
     </div>
+  );
+}
+
+function JournalEntryCard({
+  entry,
+  busy,
+  onDelete,
+  onUpdate
+}: {
+  entry: TradeJournalEntry;
+  busy: string | null;
+  onDelete: (entry: TradeJournalEntry) => void;
+  onUpdate: (entry: TradeJournalEntry, patch: JournalUpdatePatch) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(() => getJournalDraft(entry));
+  const saving = busy === `journal-update-${entry.id}`;
+  const deleting = busy === `journal-delete-${entry.id}`;
+  const rMultiple = getJournalRMultiple(entry);
+
+  useEffect(() => {
+    setDraft(getJournalDraft(entry));
+  }, [entry.id, entry.updatedAt]);
+
+  function saveReview() {
+    onUpdate(entry, {
+      status: draft.status,
+      notes: draft.notes,
+      followedPlan: draft.followedPlan === "" ? undefined : draft.followedPlan === "yes",
+      exitReason: draft.exitReason === "" ? undefined : draft.exitReason,
+      outcome: draft.outcome === "" ? undefined : draft.outcome,
+      pnl: draft.pnl.trim() === "" ? undefined : Number(draft.pnl)
+    });
+    setEditing(false);
+  }
+
+  return (
+    <article>
+      <div className="journalTopline">
+        <strong>{entry.symbol}</strong>
+        <span>{entry.status.replace("_", " ")}</span>
+        <button className="textButton ghost compactButton" onClick={() => setEditing((current) => !current)} type="button">
+          {editing ? "Close" : "Review"}
+        </button>
+        <button
+          className="iconButton danger"
+          onClick={() => onDelete(entry)}
+          disabled={deleting}
+          title="Delete journal entry"
+          aria-label={`Delete ${entry.symbol} journal entry`}
+        >
+          {deleting ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
+        </button>
+      </div>
+      <p>{formatAction(entry.action)} - {entry.notes || "No notes"}</p>
+      {entry.status === "paper_closed" && (
+        <div className="journalMeta">
+          {entry.exitReason && <span>Exit: {formatExitReason(entry.exitReason)}</span>}
+          {rMultiple !== null && <span>R: {rMultiple}</span>}
+          {typeof entry.pnl === "number" && <span>P/L: {formatCurrency(entry.pnl)}</span>}
+        </div>
+      )}
+      {(entry.sourceType || typeof entry.followedPlan === "boolean") && (
+        <small>
+          {[formatJournalSource(entry), typeof entry.followedPlan === "boolean" ? (entry.followedPlan ? "Followed plan" : "Plan deviation") : null]
+            .filter(Boolean)
+            .join(" - ")}
+        </small>
+      )}
+      <small>{formatDateTime(entry.createdAt)}</small>
+
+      {editing && (
+        <div className="journalReviewForm">
+          <label>
+            <span>Status</span>
+            <select value={draft.status} onChange={(event) => setDraft((current) => ({ ...current, status: event.target.value as TradeJournalEntry["status"] }))}>
+              {["watching", "paper_open", "paper_closed", "skipped"].map((status) => (
+                <option key={status} value={status}>{status.replace("_", " ")}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Followed plan</span>
+            <select value={draft.followedPlan} onChange={(event) => setDraft((current) => ({ ...current, followedPlan: event.target.value as JournalDraft["followedPlan"] }))}>
+              <option value="">Not reviewed</option>
+              <option value="yes">Yes</option>
+              <option value="no">No</option>
+            </select>
+          </label>
+          <label>
+            <span>Outcome</span>
+            <select value={draft.outcome} onChange={(event) => setDraft((current) => ({ ...current, outcome: event.target.value as JournalDraft["outcome"] }))}>
+              <option value="">None</option>
+              <option value="open">Open</option>
+              <option value="win">Win</option>
+              <option value="loss">Loss</option>
+              <option value="breakeven">Breakeven</option>
+            </select>
+          </label>
+          <label>
+            <span>Exit reason</span>
+            <select value={draft.exitReason} onChange={(event) => setDraft((current) => ({ ...current, exitReason: event.target.value as JournalDraft["exitReason"] }))}>
+              <option value="">None</option>
+              <option value="target">Target</option>
+              <option value="stop">Stop</option>
+              <option value="manual">Manual</option>
+              <option value="time_exit">Time exit</option>
+              <option value="score_drop">Score drop</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label>
+            <span>P/L</span>
+            <input value={draft.pnl} onChange={(event) => setDraft((current) => ({ ...current, pnl: event.target.value }))} inputMode="decimal" />
+          </label>
+          <label className="journalNotesField">
+            <span>Notes</span>
+            <textarea value={draft.notes} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} rows={3} />
+          </label>
+          <button className="textButton" onClick={saveReview} disabled={saving || Number.isNaN(Number(draft.pnl || "0"))} type="button">
+            {saving ? <Loader2 className="spin" size={15} /> : <Save size={15} />}
+            <span>Save review</span>
+          </button>
+        </div>
+      )}
+    </article>
   );
 }
 
@@ -3163,6 +3293,82 @@ function getBacktestInterpretation(result: BacktestResult): {
     summary: `${riskText} ${expectancyText} Review the trade list to see whether exits are mostly stops, score drops, or holding-period exits.`,
     tone: "neutral"
   };
+}
+
+function exportBacktestCsv(result: BacktestResult): void {
+  const csv = buildBacktestCsv(result);
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `backtest-${result.request.startDate}-${result.request.endDate}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+function buildBacktestCsv(result: BacktestResult): string {
+  const rows: Array<Array<string | number | null>> = [
+    ["section", "field", "value"],
+    ["summary", "generated_at", result.generatedAt],
+    ["summary", "symbols", result.request.symbols.join(" ")],
+    ["summary", "start_date", result.request.startDate],
+    ["summary", "end_date", result.request.endDate],
+    ["summary", "total_return_pct", result.totalReturnPct],
+    ["summary", "annualized_return_pct", result.annualizedReturnPct],
+    ["summary", "win_rate", result.winRate],
+    ["summary", "max_drawdown_pct", result.maxDrawdownPct],
+    ["summary", "number_of_trades", result.numberOfTrades],
+    ["summary", "profit_factor", result.profitFactor],
+    ["summary", "benchmark_return_pct", result.benchmarkReturnPct],
+    [],
+    ["equity_curve", "date", "equity", "benchmark_equity", "drawdown_pct"],
+    ...result.equityCurve.map<Array<string | number | null>>((point) => [
+      "equity_curve",
+      point.date,
+      point.equity,
+      point.benchmarkEquity,
+      point.drawdownPct
+    ]),
+    [],
+    [
+      "trades",
+      "id",
+      "symbol",
+      "entry_date",
+      "exit_date",
+      "entry_price",
+      "exit_price",
+      "quantity",
+      "pnl",
+      "pnl_pct",
+      "r_multiple",
+      "exit_reason"
+    ],
+    ...result.trades.map<Array<string | number | null>>((trade) => [
+      "trades",
+      trade.id,
+      trade.symbol,
+      trade.entryDate,
+      trade.exitDate,
+      trade.entryPrice,
+      trade.exitPrice,
+      trade.quantity,
+      trade.pnl,
+      trade.pnlPct,
+      trade.rMultiple,
+      trade.exitReason
+    ])
+  ];
+
+  return rows.map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+function csvCell(value: string | number | null): string {
+  if (value === null) return "";
+  const text = String(value);
+  return /[",\n]/.test(text) ? `"${text.replaceAll("\"", "\"\"")}"` : text;
 }
 
 function EmptyState({ text }: { text: string }) {
@@ -3427,6 +3633,17 @@ function formatExitReason(reason: NonNullable<TradeJournalEntry["exitReason"]>):
     other: "Other"
   };
   return labels[reason];
+}
+
+function getJournalDraft(entry: TradeJournalEntry): JournalDraft {
+  return {
+    status: entry.status,
+    followedPlan: typeof entry.followedPlan === "boolean" ? (entry.followedPlan ? "yes" : "no") : "",
+    exitReason: entry.exitReason ?? "",
+    outcome: entry.outcome ?? "",
+    pnl: typeof entry.pnl === "number" ? String(entry.pnl) : "",
+    notes: entry.notes
+  };
 }
 
 function getJournalRMultiple(entry: TradeJournalEntry): number | null {

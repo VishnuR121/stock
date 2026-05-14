@@ -87,7 +87,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -193,6 +194,12 @@ h3 {
 .textButton.ghost {
   color: var(--text);
   background: var(--surface-strong);
+}
+
+.textButton.compactButton {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 0.78rem;
 }
 
 .wideButton,
@@ -707,6 +714,13 @@ h3 {
 
 .panelTitle.spaced {
   justify-content: space-between;
+}
+
+.panelActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .panelTitle.compact {
@@ -2003,6 +2017,51 @@ select {
   background: var(--surface-muted);
 }
 
+.journalReviewForm {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.journalReviewForm label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.journalReviewForm label span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.journalReviewForm input,
+.journalReviewForm select,
+.journalReviewForm textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 10px;
+  color: var(--text);
+  background: var(--surface-soft);
+}
+
+.journalReviewForm textarea {
+  resize: vertical;
+}
+
+.journalReviewForm .journalNotesField {
+  grid-column: 1 / -2;
+}
+
+.journalReviewForm .textButton {
+  align-self: end;
+}
+
 .exitReasonSelect {
   display: grid;
   gap: 5px;
@@ -2338,6 +2397,10 @@ th {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .journalReviewForm {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .workspaceTabs {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -2404,8 +2467,13 @@ th {
   .backtestMetrics,
   .backtestInterpretation,
   .journalAnalytics,
+  .journalReviewForm,
   .reviewList {
     grid-template-columns: 1fr;
+  }
+
+  .journalReviewForm .journalNotesField {
+    grid-column: 1;
   }
 
   .sideRail {

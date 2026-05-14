@@ -143,6 +143,12 @@ describe("dashboard", () => {
           mostCommonExitReason: "stop"
         });
       }
+      if (target.includes("/api/journal/") && init?.method === "PATCH") {
+        const id = target.split("/api/journal/")[1];
+        const patch = JSON.parse(String(init.body ?? "{}"));
+        journalEntries = journalEntries.map((entry) => entry.id === id ? { ...entry, ...patch, updatedAt: "2026-05-13T12:00:00.000Z" } : entry);
+        return jsonResponse(journalEntries.find((entry) => entry.id === id));
+      }
       if (target.includes("/api/journal/") && init?.method === "DELETE") {
         const id = target.split("/api/journal/")[1];
         journalEntries = journalEntries.filter((entry) => entry.id !== id);
@@ -204,6 +210,7 @@ describe("dashboard", () => {
     expect(screen.getByText("13 total")).toBeInTheDocument();
     expect(screen.getByText("target")).toBeInTheDocument();
     expect(screen.getByText("Regime filter used SPY and QQQ history.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Export CSV$/i })).toBeInTheDocument();
     expect(backtestPosts[0]).toContain('"marketRegimeFilter":["bullish"]');
   });
 
@@ -265,6 +272,14 @@ describe("dashboard", () => {
     fireEvent.click(screen.getByRole("button", { name: /Closed journal entries \(1\)/i }));
     expect(screen.queryByText(/Delete me/)).not.toBeInTheDocument();
     expect(screen.getByText("AAPL")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Review$/i }));
+    fireEvent.change(screen.getByLabelText("Followed plan"), { target: { value: "no" } });
+    fireEvent.change(screen.getByLabelText("Exit reason"), { target: { value: "score_drop" } });
+    fireEvent.change(screen.getByLabelText("P/L"), { target: { value: "-25" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save review$/i }));
+    await waitFor(() => expect(screen.getByText("Plan deviation")).toBeInTheDocument());
+    expect(screen.getByText("Exit: Score drop")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Watching journal entries \(1\)/i }));
     expect(screen.getByText(/Delete me/)).toBeInTheDocument();

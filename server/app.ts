@@ -32,6 +32,7 @@ import type {
   SignalSnapshot,
   TradeAction,
   TradeContext,
+  TradeJournalEntry,
   TradingViewSignal,
   WatchlistItem
 } from "../src/shared/types";
@@ -544,6 +545,10 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
     response.json(entry);
   }));
 
+  app.patch("/api/journal/:id", asyncHandler(async (request, response) => {
+    response.json(await store.updateJournalEntry(request.params.id, normalizeJournalPatch(request.body)));
+  }));
+
   app.delete("/api/journal/:id", asyncHandler(async (request, response) => {
     response.json(await store.deleteJournalEntry(request.params.id));
   }));
@@ -681,9 +686,44 @@ function normalizeAction(value: unknown): TradeAction {
   return allowed.includes(value as TradeAction) ? (value as TradeAction) : "watch";
 }
 
+function normalizeOptionalAction(value: unknown): TradeAction | undefined {
+  const allowed: TradeAction[] = ["avoid", "watch", "paper_long_candidate", "paper_short_candidate", "options_research_only"];
+  return allowed.includes(value as TradeAction) ? (value as TradeAction) : undefined;
+}
+
+function normalizeJournalPatch(body: unknown): Partial<Omit<TradeJournalEntry, "id" | "createdAt">> {
+  const input = body && typeof body === "object" ? body as Record<string, unknown> : {};
+  const patch: Partial<Omit<TradeJournalEntry, "id" | "createdAt">> = {};
+
+  if (hasOwn(input, "status")) {
+    const status = normalizeOptionalStatus(input.status);
+    if (status) patch.status = status;
+  }
+  if (hasOwn(input, "action")) {
+    const action = normalizeOptionalAction(input.action);
+    if (action) patch.action = action;
+  }
+  if (hasOwn(input, "notes")) patch.notes = String(input.notes ?? "");
+  if (hasOwn(input, "followedPlan")) patch.followedPlan = typeof input.followedPlan === "boolean" ? input.followedPlan : undefined;
+  if (hasOwn(input, "exitReason")) patch.exitReason = normalizeJournalExitReason(input.exitReason);
+  if (hasOwn(input, "outcome")) patch.outcome = normalizeOutcome(input.outcome);
+  if (hasOwn(input, "entryPrice")) patch.entryPrice = optionalNumber(input.entryPrice);
+  if (hasOwn(input, "exitPrice")) patch.exitPrice = optionalNumber(input.exitPrice);
+  if (hasOwn(input, "stopLossPrice")) patch.stopLossPrice = optionalNumber(input.stopLossPrice);
+  if (hasOwn(input, "takeProfitPrice")) patch.takeProfitPrice = optionalNumber(input.takeProfitPrice);
+  if (hasOwn(input, "pnl")) patch.pnl = optionalNumber(input.pnl);
+
+  return patch;
+}
+
 function normalizeStatus(value: unknown): JournalStatus {
   const allowed: JournalStatus[] = ["watching", "paper_open", "paper_closed", "skipped"];
   return allowed.includes(value as JournalStatus) ? (value as JournalStatus) : "watching";
+}
+
+function normalizeOptionalStatus(value: unknown): JournalStatus | undefined {
+  const allowed: JournalStatus[] = ["watching", "paper_open", "paper_closed", "skipped"];
+  return allowed.includes(value as JournalStatus) ? (value as JournalStatus) : undefined;
 }
 
 function normalizeJournalSourceType(value: unknown): JournalSourceType | undefined {
@@ -694,6 +734,17 @@ function normalizeJournalSourceType(value: unknown): JournalSourceType | undefin
 function normalizeJournalExitReason(value: unknown): JournalExitReason | undefined {
   const allowed: JournalExitReason[] = ["target", "stop", "manual", "time_exit", "score_drop", "other"];
   return allowed.includes(value as JournalExitReason) ? (value as JournalExitReason) : undefined;
+}
+
+function normalizeOutcome(value: unknown): TradeJournalEntry["outcome"] | undefined {
+  const allowed: Array<NonNullable<TradeJournalEntry["outcome"]>> = ["win", "loss", "breakeven", "open"];
+  return allowed.includes(value as NonNullable<TradeJournalEntry["outcome"]>)
+    ? (value as NonNullable<TradeJournalEntry["outcome"]>)
+    : undefined;
+}
+
+function hasOwn(input: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(input, key);
 }
 
 function optionalNumber(value: unknown): number | undefined {
