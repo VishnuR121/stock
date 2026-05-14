@@ -1422,6 +1422,17 @@ function OverviewPanel({
       </section>
 
       <section className="overviewGrid">
+        <article className="overviewCard safetyReminder">
+          <div>
+            <span>Research guardrails</span>
+            <strong>Paper only</strong>
+          </div>
+          <p>
+            Educational swing-trading research only. Not financial advice, not live-money trading, and options remain analysis-only.
+          </p>
+          <small>Backtests can mislead; risk controls and manual review still apply.</small>
+        </article>
+
         <article className="overviewCard">
           <div>
             <span>Broad market</span>

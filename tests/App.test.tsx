@@ -166,6 +166,8 @@ describe("dashboard", () => {
     expect(screen.getByText("Today")).toBeInTheDocument();
     expect(await screen.findByText("Market regime")).toBeInTheDocument();
     expect(screen.getByText("Bullish")).toBeInTheDocument();
+    expect(screen.getByText("Research guardrails")).toBeInTheDocument();
+    expect(screen.getByText("Paper only")).toBeInTheDocument();
     expect(screen.getAllByText("Run scan").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: /^Research$/i }));

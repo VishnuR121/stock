@@ -118,7 +118,7 @@ npm run db:push
 npm run db:studio
 ```
 
-Note: newer journal source metadata is currently preserved in JSON storage. Postgres remains compatible with the existing journal table; add a deliberate migration before persisting those extra metadata fields in Postgres columns.
+Journal source metadata, follow-plan flags, signal timestamps, and exit reasons are stored in both JSON and Postgres. Run `npm run db:push` or apply the included Drizzle migrations after pulling schema changes.
 
 ## Backtesting Notes
 

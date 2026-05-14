@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { integer, jsonb, numeric, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, integer, jsonb, numeric, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import type {
   AlgoTradeProposal,
   AnalysisRun,
@@ -94,6 +94,11 @@ export const journalEntries = pgTable("journal_entries", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   planId: text("plan_id"),
+  signalAsOf: timestamp("signal_as_of", { withTimezone: true }),
+  sourceType: text("source_type").$type<TradeJournalEntry["sourceType"]>(),
+  sourceId: text("source_id"),
+  followedPlan: boolean("followed_plan"),
+  exitReason: text("exit_reason").$type<TradeJournalEntry["exitReason"]>(),
   status: text("status").$type<TradeJournalEntry["status"]>().notNull(),
   action: text("action").$type<TradeAction>().notNull(),
   notes: text("notes").notNull().default(""),
