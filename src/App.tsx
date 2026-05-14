@@ -1007,8 +1007,16 @@ export function App() {
                   <StatusTile
                     icon={<ShieldCheck size={20} />}
                     label="Broker"
-                    value={health?.alpacaConfigured ? "Connected" : "Needs keys"}
-                    tone={health?.alpacaConfigured ? "good" : "warn"}
+                    value={formatBrokerStatus(health)}
+                    detail={health?.alpacaPaperOnly ? "Alpaca paper endpoint" : "Live URL blocked"}
+                    tone={health?.alpacaConfigured && health.alpacaPaperOnly ? "good" : "warn"}
+                  />
+                  <StatusTile
+                    icon={<ShieldCheck size={20} />}
+                    label="Execution"
+                    value={health?.paperTradingBlockedReasons?.length ? "Blocked" : "Paper only"}
+                    detail={health?.paperTradingBlockedReasons?.[0] ?? "Manual confirmation required"}
+                    tone={health?.paperTradingBlockedReasons?.length ? "warn" : "good"}
                   />
                   <StatusTile
                     icon={<Bot size={20} />}
@@ -1016,6 +1024,20 @@ export function App() {
                     value={health?.aiConfigured ? formatAiProvider(health.aiProvider) : `${formatAiProvider(health?.aiProvider)} needs key`}
                     detail={health?.aiConfigured ? health.aiModel : undefined}
                     tone={health?.aiConfigured ? "good" : "warn"}
+                  />
+                  <StatusTile
+                    icon={<Search size={20} />}
+                    label="Context data"
+                    value={formatContextProviderStatus(health)}
+                    detail={health?.secUserAgentConfigured ? "SEC user agent set" : "Set SEC_USER_AGENT"}
+                    tone={health?.alphaVantageConfigured || health?.secUserAgentConfigured ? "neutral" : "warn"}
+                  />
+                  <StatusTile
+                    icon={<Settings size={20} />}
+                    label="Data store"
+                    value={health?.databaseConfigured ? "Postgres" : "Local JSON"}
+                    detail={health ? formatDataStore(health.dataStore) : undefined}
+                    tone="neutral"
                   />
                   <StatusTile
                     icon={<CircleDollarSign size={20} />}
@@ -2913,6 +2935,26 @@ function formatNumber(value?: number | null): string {
 
 function formatAiProvider(provider?: HealthStatus["aiProvider"]): string {
   return provider === "anthropic" ? "Claude" : "OpenAI";
+}
+
+function formatBrokerStatus(health: HealthStatus | null): string {
+  if (!health) return "Checking";
+  if (!health.alpacaPaperOnly) return "Blocked";
+  return health.alpacaConfigured ? "Paper ready" : "Needs keys";
+}
+
+function formatContextProviderStatus(health: HealthStatus | null): string {
+  if (!health) return "Checking";
+  if (health.alphaVantageConfigured && health.secUserAgentConfigured) return "Full";
+  if (health.alphaVantageConfigured || health.secUserAgentConfigured) return "Partial";
+  return "Limited";
+}
+
+function formatDataStore(value: string): string {
+  if (value === "postgres") return "Server database";
+  const normalized = value.replaceAll("\\", "/");
+  const parts = normalized.split("/");
+  return parts.slice(-2).join("/");
 }
 
 function formatOpportunityCategory(category: OpportunityCandidate["category"]): string {

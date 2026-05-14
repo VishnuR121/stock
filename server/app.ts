@@ -98,11 +98,20 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
   app.use(cors());
   app.use(express.json({ limit: "1mb" }));
 
-  app.get("/api/health", (_request, response) => {
+  app.get("/api/health", asyncHandler(async (_request, response) => {
+    const riskSettings = await store.getRiskSettings();
+    const alpacaPaperOnly = isPaperAlpacaUrl(config.alpacaPaperBaseUrl);
+    const paperTradingBlockedReasons = getPaperTradingBlockedReasons({
+      alpacaConfigured: alpaca.configured,
+      alpacaPaperOnly,
+      killSwitchEnabled: riskSettings.killSwitchEnabled
+    });
     const status: HealthStatus = {
       ok: true,
       alpacaConfigured: alpaca.configured,
-      alpacaPaperOnly: isPaperAlpacaUrl(config.alpacaPaperBaseUrl),
+      alpacaPaperOnly,
+      paperTradingBlockedReasons,
+      killSwitchEnabled: riskSettings.killSwitchEnabled,
       aiProvider: config.aiProvider,
       aiConfigured: tradePlanner.configured,
       aiModel: config.aiProvider === "anthropic" ? config.anthropicModel : config.openAiModel,
@@ -111,11 +120,13 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       anthropicConfigured: Boolean(config.anthropicApiKey),
       anthropicModel: config.anthropicModel,
       alphaVantageConfigured: Boolean(config.alphaVantageApiKey),
+      secUserAgentConfigured: isConfiguredSecUserAgent(config.secUserAgent),
+      tradingViewWebhookConfigured: Boolean(config.tradingViewWebhookSecret),
       databaseConfigured: Boolean(config.databaseUrl),
       dataStore: getStoreDescription(config) === "postgres" ? "postgres" : path.resolve(config.dataFilePath)
     };
     response.json(status);
-  });
+  }));
 
   app.get("/api/watchlist", asyncHandler(async (_request, response) => {
     response.json(await store.getWatchlist());
@@ -732,6 +743,22 @@ function getBacktestBarsOptions(request: BacktestRequest): { limit: number; star
 
 function isValidDateKey(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(new Date(`${value}T00:00:00.000Z`).getTime());
+}
+
+function getPaperTradingBlockedReasons(input: {
+  alpacaConfigured: boolean;
+  alpacaPaperOnly: boolean;
+  killSwitchEnabled: boolean;
+}): string[] {
+  const reasons: string[] = [];
+  if (!input.alpacaPaperOnly) reasons.push("Alpaca live trading URL is blocked.");
+  if (!input.alpacaConfigured) reasons.push("Alpaca paper credentials are missing.");
+  if (input.killSwitchEnabled) reasons.push("Paper order kill switch is enabled.");
+  return reasons;
+}
+
+function isConfiguredSecUserAgent(userAgent: string): boolean {
+  return Boolean(userAgent.trim()) && userAgent !== "ResearchCopilot/0.1 contact@example.com";
 }
 
 async function safeAccount(alpaca: AlpacaClient) {

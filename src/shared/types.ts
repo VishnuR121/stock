@@ -708,6 +708,8 @@ export interface HealthStatus {
   ok: boolean;
   alpacaConfigured: boolean;
   alpacaPaperOnly: boolean;
+  paperTradingBlockedReasons: string[];
+  killSwitchEnabled: boolean;
   aiProvider: "openai" | "anthropic";
   aiConfigured: boolean;
   aiModel: string;
@@ -716,6 +718,8 @@ export interface HealthStatus {
   anthropicConfigured: boolean;
   anthropicModel: string;
   alphaVantageConfigured: boolean;
+  secUserAgentConfigured: boolean;
+  tradingViewWebhookConfigured: boolean;
   databaseConfigured: boolean;
   dataStore: string;
 }

@@ -39,6 +39,8 @@ describe("dashboard", () => {
           ok: true,
           alpacaConfigured: false,
           alpacaPaperOnly: true,
+          paperTradingBlockedReasons: ["Alpaca paper credentials are missing."],
+          killSwitchEnabled: false,
           aiProvider: "openai",
           aiConfigured: false,
           aiModel: "gpt-5.4-mini",
@@ -47,6 +49,8 @@ describe("dashboard", () => {
           anthropicConfigured: false,
           anthropicModel: "claude-sonnet-4-6",
           alphaVantageConfigured: false,
+          secUserAgentConfigured: false,
+          tradingViewWebhookConfigured: false,
           databaseConfigured: false,
           dataStore: "data/app-data.json"
         });
@@ -130,6 +134,10 @@ describe("dashboard", () => {
     expect(screen.getByText("Today")).toBeInTheDocument();
     expect(await screen.findByText("Market regime")).toBeInTheDocument();
     expect(screen.getByText("Bullish")).toBeInTheDocument();
+    expect(screen.getByText("Blocked")).toBeInTheDocument();
+    expect(screen.getByText("Alpaca paper endpoint")).toBeInTheDocument();
+    expect(screen.getByText("Local JSON")).toBeInTheDocument();
+    expect(screen.getByText("Limited")).toBeInTheDocument();
     expect(screen.getAllByText("Run scan").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: /^Research$/i }));

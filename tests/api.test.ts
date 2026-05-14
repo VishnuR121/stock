@@ -20,6 +20,7 @@ describe("API safety behavior", () => {
 
     const response = await request(app).get("/api/health").expect(200);
     expect(response.body.alpacaPaperOnly).toBe(false);
+    expect(response.body.paperTradingBlockedReasons).toContain("Alpaca live trading URL is blocked.");
   });
 
   it("reports the selected Anthropic AI provider", async () => {
@@ -38,6 +39,30 @@ describe("API safety behavior", () => {
     expect(response.body.aiModel).toBe("claude-test-model");
     expect(response.body.openAiConfigured).toBe(false);
     expect(response.body.anthropicConfigured).toBe(true);
+  });
+
+  it("reports provider and paper safety status without exposing secrets", async () => {
+    const app = createApp({
+      alpacaKeyId: "key",
+      alpacaSecretKey: "secret",
+      openAiApiKey: "openai-secret",
+      alphaVantageApiKey: "alpha-secret",
+      secUserAgent: "ResearchCopilot/0.1 test@example.com",
+      tradingViewWebhookSecret: "webhook-secret",
+      databaseUrl: undefined,
+      dataFilePath: "data/test-provider-health.json"
+    });
+
+    const response = await request(app).get("/api/health").expect(200);
+    expect(response.body.alpacaConfigured).toBe(true);
+    expect(response.body.alpacaPaperOnly).toBe(true);
+    expect(response.body.paperTradingBlockedReasons).toEqual([]);
+    expect(response.body.alphaVantageConfigured).toBe(true);
+    expect(response.body.secUserAgentConfigured).toBe(true);
+    expect(response.body.tradingViewWebhookConfigured).toBe(true);
+    expect(JSON.stringify(response.body)).not.toContain("openai-secret");
+    expect(JSON.stringify(response.body)).not.toContain("alpha-secret");
+    expect(JSON.stringify(response.body)).not.toContain("webhook-secret");
   });
 
   it("blocks account calls when the Alpaca URL is not paper", async () => {
@@ -124,6 +149,9 @@ describe("API safety behavior", () => {
     });
 
     await request(app).post("/api/settings/risk").send({ killSwitchEnabled: true }).expect(200);
+    const health = await request(app).get("/api/health").expect(200);
+    expect(health.body.killSwitchEnabled).toBe(true);
+    expect(health.body.paperTradingBlockedReasons).toContain("Paper order kill switch is enabled.");
 
     const response = await request(app)
       .post("/api/alpaca/paper-orders")
