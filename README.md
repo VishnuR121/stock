@@ -36,10 +36,12 @@ This is an educational research and paper-trading tool. It is not financial advi
 
 - **Overview:** market regime, paper account status, risk controls, opportunities, open positions, and warnings.
 - **Research:** watchlist scans, opportunity scan, ranked setups, symbol detail, quant plan, Decision Center, AI plan, context, and options research.
+- **Trade Plan:** deterministic quant plan, AI explanation, journal actions, and paper-order drafting for the active setup.
 - **Backtests:** historical strategy test, market-regime filters, summary metrics, equity curve table, trade table, and SPY comparison.
 - **Algo:** approval queue for paper-trade proposals. Options proposals remain research-only.
 - **Positions / Orders:** paper positions, paper orders, position monitor, close/flatten controls, and safety controls.
-- **Account / Journal:** account details, trade journal, paper-trade analytics, follow-plan rate, common exits, and skipped reasons.
+- **Journal:** filterable watching, open, closed, and skipped journal entries with paper-trade analytics.
+- **Account / Settings:** paper account details, risk controls, kill switch, and API/data-provider status.
 
 ## Setup
 
@@ -148,7 +150,7 @@ Not allowed:
 
 ## Verification
 
-Run these before finishing a phase:
+Run these before merging a larger implementation chunk:
 
 ```bash
 npm test

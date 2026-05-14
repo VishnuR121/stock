@@ -71,8 +71,9 @@ type BeginnerAction = {
 };
 type ThemeMode = "light" | "dark";
 type AnalysisView = "decision" | "plan";
-type WorkspaceView = "overview" | "research" | "backtests" | "algo" | "positions" | "orders" | "journal" | "account";
+type WorkspaceView = "overview" | "research" | "trade-plan" | "backtests" | "algo" | "positions" | "orders" | "journal" | "account" | "settings";
 type AlgoQueueFilter = "active" | "selected" | "all" | "history";
+type JournalFilter = "all" | "watching" | "paper_open" | "paper_closed" | "skipped";
 
 type BacktestForm = {
   symbols: string;
@@ -138,6 +139,7 @@ export function App() {
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("overview");
   const [algoQueueFilter, setAlgoQueueFilter] = useState<AlgoQueueFilter>("active");
   const [algoSearch, setAlgoSearch] = useState("");
+  const [journalFilter, setJournalFilter] = useState<JournalFilter>("all");
   const [backtestForm, setBacktestForm] = useState<BacktestForm>(defaultBacktestForm);
   const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
 
@@ -180,6 +182,8 @@ export function App() {
   const activeAnalysis = activeSignal ? analysisRuns[activeSignal.symbol] : null;
   const activeContext = activeSignal ? contextsBySymbol[activeSignal.symbol] ?? activeAnalysis?.context ?? activePlanRecord?.context ?? null : null;
   const activeOptions = activeSignal ? optionsBySymbol[activeSignal.symbol] ?? [] : [];
+  const filteredJournal = useMemo(() => filterJournalEntries(journal, journalFilter), [journal, journalFilter]);
+  const journalCounts = useMemo(() => getJournalFilterCounts(journal), [journal]);
   const orderReferencePrice = orderDraft.orderType === "limit" ? orderDraft.limitPrice ?? null : activeSignal?.lastPrice ?? null;
   const orderTargetRealism = checkDayOrderTargetRealism({
     order: orderDraft,
@@ -994,7 +998,47 @@ export function App() {
         <h2>Trade journal</h2>
       </div>
       <JournalAnalyticsSummary analytics={journalAnalytics} />
-      <JournalList journal={journal} busy={busy} onDelete={deleteJournalEntry} />
+      <JournalFilterTabs filter={journalFilter} counts={journalCounts} onChange={setJournalFilter} />
+      <JournalList journal={filteredJournal} busy={busy} onDelete={deleteJournalEntry} />
+    </section>
+  );
+
+  const dataStatusPanel = (
+    <section className="panel compactPanel">
+      <div className="panelTitle">
+        <Settings size={18} />
+        <h2>API + data status</h2>
+      </div>
+      <section className="statusGrid settingsStatusGrid">
+        <StatusTile
+          icon={<ShieldCheck size={20} />}
+          label="Broker"
+          value={formatBrokerStatus(health)}
+          detail={health?.alpacaPaperOnly ? "Paper endpoint only" : "Live URL rejected"}
+          tone={health?.alpacaConfigured && health.alpacaPaperOnly ? "good" : "warn"}
+        />
+        <StatusTile
+          icon={<Bot size={20} />}
+          label="AI"
+          value={health?.aiConfigured ? formatAiProvider(health.aiProvider) : `${formatAiProvider(health?.aiProvider)} needs key`}
+          detail={health?.aiConfigured ? health.aiModel : "Deterministic plans still work"}
+          tone={health?.aiConfigured ? "good" : "warn"}
+        />
+        <StatusTile
+          icon={<Search size={20} />}
+          label="Context"
+          value={formatContextProviderStatus(health)}
+          detail={health?.secUserAgentConfigured ? "SEC configured" : "SEC user agent missing"}
+          tone={health?.alphaVantageConfigured || health?.secUserAgentConfigured ? "neutral" : "warn"}
+        />
+        <StatusTile
+          icon={<Settings size={20} />}
+          label="Storage"
+          value={health?.databaseConfigured ? "Postgres" : "Local JSON"}
+          detail={health ? formatDataStore(health.dataStore) : undefined}
+          tone="neutral"
+        />
+      </section>
     </section>
   );
 
@@ -1197,6 +1241,13 @@ export function App() {
             </div>
           )}
 
+          {workspaceView === "trade-plan" && (
+            <div className="tabSurface twoColumnSurface">
+              {detailPanel}
+              {orderPanel}
+            </div>
+          )}
+
           {workspaceView === "algo" && (
             <div className="tabSurface">
               <AlgoCommandCenter
@@ -1235,14 +1286,21 @@ export function App() {
 
           {workspaceView === "account" && (
             <div className="tabSurface accountSurface">
+              {accountPanel}
+            </div>
+          )}
+
+          {workspaceView === "settings" && (
+            <div className="tabSurface settingsSurface">
               <div className="accountStack">
-                {accountPanel}
                 <RiskSettingsPanel
                   riskSettings={riskSettings}
                   busy={busy === "risk-settings"}
                   onSave={saveRiskSettings}
                 />
+                {dataStatusPanel}
               </div>
+              {safetyPanel}
             </div>
           )}
 
@@ -1326,12 +1384,14 @@ function WorkspaceTabs({
   const tabs: Array<{ view: WorkspaceView; label: string; icon: JSX.Element }> = [
     { view: "overview", label: "Overview", icon: <Activity size={16} /> },
     { view: "research", label: "Research", icon: <Target size={16} /> },
+    { view: "trade-plan", label: "Trade Plan", icon: <CheckCircle2 size={16} /> },
     { view: "backtests", label: "Backtests", icon: <BarChart3 size={16} /> },
     { view: "algo", label: "Algo", icon: <Bot size={16} /> },
     { view: "positions", label: "Positions", icon: <LineChart size={16} /> },
     { view: "orders", label: "Orders", icon: <ClipboardCheck size={16} /> },
     { view: "journal", label: "Journal", icon: <ClipboardCheck size={16} /> },
-    { view: "account", label: "Account", icon: <Settings size={16} /> }
+    { view: "account", label: "Account", icon: <CircleDollarSign size={16} /> },
+    { view: "settings", label: "Settings", icon: <Settings size={16} /> }
   ];
 
   return (
@@ -2890,6 +2950,36 @@ function JournalAnalyticsSummary({ analytics }: { analytics: JournalAnalytics | 
   );
 }
 
+function JournalFilterTabs({
+  filter,
+  counts,
+  onChange
+}: {
+  filter: JournalFilter;
+  counts: Record<JournalFilter, number>;
+  onChange: (filter: JournalFilter) => void;
+}) {
+  const filters: JournalFilter[] = ["all", "watching", "paper_open", "paper_closed", "skipped"];
+
+  return (
+    <div className="journalFilters" aria-label="Journal filters">
+      {filters.map((candidate) => (
+        <button
+          key={candidate}
+          className={filter === candidate ? "active" : ""}
+          type="button"
+          onClick={() => onChange(candidate)}
+          aria-pressed={filter === candidate}
+          aria-label={`${formatJournalFilter(candidate)} journal entries (${counts[candidate]})`}
+        >
+          <span>{formatJournalFilter(candidate)}</span>
+          <strong>{counts[candidate]}</strong>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function JournalList({
   journal,
   busy,
@@ -2903,7 +2993,7 @@ function JournalList({
 
   return (
     <div className="journalList">
-      {journal.slice(0, 6).map((entry) => (
+      {journal.map((entry) => (
         <article key={entry.id}>
           {(() => {
             const rMultiple = getJournalRMultiple(entry);
@@ -3340,6 +3430,39 @@ function formatAction(action?: TradeAction): string {
     default:
       return "Watch";
   }
+}
+
+function filterJournalEntries(journal: TradeJournalEntry[], filter: JournalFilter): TradeJournalEntry[] {
+  if (filter === "all") return journal;
+  return journal.filter((entry) => entry.status === filter);
+}
+
+function getJournalFilterCounts(journal: TradeJournalEntry[]): Record<JournalFilter, number> {
+  return journal.reduce<Record<JournalFilter, number>>(
+    (counts, entry) => {
+      counts.all += 1;
+      counts[entry.status] += 1;
+      return counts;
+    },
+    {
+      all: 0,
+      watching: 0,
+      paper_open: 0,
+      paper_closed: 0,
+      skipped: 0
+    }
+  );
+}
+
+function formatJournalFilter(filter: JournalFilter): string {
+  const labels: Record<JournalFilter, string> = {
+    all: "All",
+    watching: "Watching",
+    paper_open: "Open",
+    paper_closed: "Closed",
+    skipped: "Skipped"
+  };
+  return labels[filter];
 }
 
 function formatJournalSource(entry: TradeJournalEntry): string | null {

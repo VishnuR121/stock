@@ -159,9 +159,11 @@ describe("dashboard", () => {
     expect((await screen.findAllByText("SPY")).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /^Overview$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Research$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Trade Plan$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Backtests$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Orders$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Journal$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Settings$/i })).toBeInTheDocument();
     expect(screen.getByText("Today")).toBeInTheDocument();
     expect(await screen.findByText("Market regime")).toBeInTheDocument();
     expect(screen.getByText("Bullish")).toBeInTheDocument();
@@ -173,6 +175,10 @@ describe("dashboard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Research$/i }));
     expect(screen.getByText("Opportunity Finder")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Trade Plan$/i }));
+    expect(screen.getByText("Paper order")).toBeInTheDocument();
+    expect(screen.getByText("Quant plan")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /^Algo$/i }));
     expect(screen.getByText("Algo Command Center")).toBeInTheDocument();
@@ -259,16 +265,24 @@ describe("dashboard", () => {
     expect(screen.getByText("Common exit: Stop")).toBeInTheDocument();
     expect(screen.getByText("Common skip: Earnings too close")).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("button", { name: /Closed journal entries \(1\)/i }));
+    expect(screen.queryByText(/Delete me/)).not.toBeInTheDocument();
+    expect(screen.getByText("AAPL")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Watching journal entries \(1\)/i }));
+    expect(screen.getByText(/Delete me/)).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: /Delete SPY journal entry/i }));
     await waitFor(() => expect(screen.queryByText(/Delete me/)).not.toBeInTheDocument());
   });
 
-  it("saves edited risk settings from the account workspace", async () => {
+  it("saves edited risk settings from the settings workspace", async () => {
     render(<App />);
 
     await screen.findAllByText("SPY");
-    fireEvent.click(screen.getByRole("button", { name: /^Account$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Settings$/i }));
     expect(await screen.findByText("Risk settings")).toBeInTheDocument();
+    expect(screen.getByText("API + data status")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Max risk per trade %"), { target: { value: "0.5" } });
     fireEvent.change(screen.getByLabelText("Minimum R/R"), { target: { value: "2" } });
