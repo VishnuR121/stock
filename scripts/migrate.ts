@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import dotenv from "dotenv";
 import { getConfig } from "../server/config";
@@ -62,8 +62,31 @@ async function main() {
 
 async function loadMigrationEntries(): Promise<MigrationEntry[]> {
   const journalPath = path.resolve("drizzle/meta/_journal.json");
-  const journal = JSON.parse(await readFile(journalPath, "utf8")) as MigrationJournal;
-  return [...journal.entries].sort((a, b) => a.idx - b.idx);
+  const journal = await readMigrationJournal(journalPath);
+  const journalEntries = new Map(journal.entries.map((entry) => [entry.tag, entry]));
+  const sqlFiles = await readdir(path.resolve("drizzle"));
+
+  for (const file of sqlFiles) {
+    const match = /^(\d{4})_(.+)\.sql$/.exec(file);
+    if (!match) continue;
+    const tag = `${match[1]}_${match[2]}`;
+    if (!journalEntries.has(tag)) {
+      journalEntries.set(tag, {
+        idx: Number(match[1]),
+        tag
+      });
+    }
+  }
+
+  return [...journalEntries.values()].sort((a, b) => a.idx - b.idx || a.tag.localeCompare(b.tag));
+}
+
+async function readMigrationJournal(journalPath: string): Promise<MigrationJournal> {
+  try {
+    return JSON.parse(await readFile(journalPath, "utf8")) as MigrationJournal;
+  } catch {
+    return { entries: [] };
+  }
 }
 
 async function getAppliedMigrationIds(client: ReturnType<typeof createPostgresClient>): Promise<string[]> {

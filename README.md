@@ -111,9 +111,9 @@ Keep the database private on the server. Do not put Supabase keys or database UR
    npm run db:migrate
    ```
 
-   `npm run db:migrate` applies the SQL files in `drizzle/` and tracks completed migrations in the database. It avoids the `drizzle-kit push` introspection path that can fail on some hosted Postgres schemas.
+   `npm run db:migrate` applies the SQL files in `drizzle/` and tracks completed migrations in the database. It also discovers SQL migrations even if Drizzle journal metadata was not updated, which avoids the `drizzle-kit push` introspection path that can fail on some hosted Postgres schemas.
 
-   `npm run db:push` remains available as a Drizzle development convenience, but migrations are the recommended path.
+   `npm run db:push` is intentionally aliased to the same migration runner for this repo. Do not use raw `drizzle-kit push` against the production database.
 
 4. Import existing local JSON data once if needed:
 
