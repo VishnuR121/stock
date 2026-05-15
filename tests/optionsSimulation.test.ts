@@ -69,6 +69,40 @@ describe("options simulation monitor", () => {
     });
     expect(snapshot.positions[0].warnings.join(" ")).toMatch(/missing a current quote/i);
   });
+
+  it("flags assignment risk for near-expiration short option legs", () => {
+    const snapshot = buildSimulatedOptionsSnapshot({
+      now: new Date("2026-06-14T15:00:00.000Z"),
+      journal: [entry({
+        expressionType: "cash_secured_put",
+        optionLegs: [leg({
+          optionSymbol: "AAPL260619P00135000",
+          optionType: "put",
+          side: "sell",
+          strike: 135,
+          expiration: "2026-06-19",
+          estimatedMid: 2.5
+        })],
+        optionsMetadata: { estimatedCredit: 250 },
+        maxLoss: 13250,
+        maxProfit: 250
+      })],
+      optionsByUnderlying: {
+        AAPL: [idea({
+          symbol: "AAPL260619P00135000",
+          type: "put",
+          strikePrice: 135,
+          midPrice: 2
+        })]
+      }
+    });
+
+    expect(snapshot.positions[0]).toMatchObject({
+      assignmentRisk: true,
+      exitUrgency: "watch"
+    });
+    expect(snapshot.positions[0].assignmentRiskReasons.join(" ")).toMatch(/assignment/i);
+  });
 });
 
 function entry(patch: Partial<TradeJournalEntry> = {}): TradeJournalEntry {

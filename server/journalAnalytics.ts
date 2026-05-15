@@ -99,8 +99,16 @@ function buildOptionsMetrics(entries: TradeJournalEntry[]): JournalAnalytics["op
     performanceByDteBucket: buildStats(optionsEntries, (entry) => getDteBucket(getAverageEntryDte(entry))),
     performanceByOptionType: buildStats(optionsEntries, getOptionTypeKey),
     performanceByStructure: buildStats(optionsEntries, (entry) => (entry.optionLegs?.length ?? 0) > 1 ? "spread" : "single_leg"),
-    assignmentRiskEvents: optionsEntries.filter((entry) => entry.optionLegs?.some((leg) => leg.side === "sell")).length
+    assignmentRiskEvents: optionsEntries.filter(hasAssignmentRiskEvent).length
   };
+}
+
+function hasAssignmentRiskEvent(entry: TradeJournalEntry): boolean {
+  if (entry.optionsMetadata?.assignmentRiskEvent === true) return true;
+  if (entry.strategyWarnings?.some((warning) => /assignment risk|assigned|called away/i.test(warning))) return true;
+  if (!entry.optionLegs?.some((leg) => leg.side === "sell")) return false;
+  const dte = getAverageEntryDte(entry);
+  return typeof dte === "number" && dte <= 14;
 }
 
 function getPnl(entry: TradeJournalEntry): number | undefined {

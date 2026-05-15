@@ -76,6 +76,10 @@ describe("journal analytics", () => {
             expiration: "2026-06-19"
           }
         ],
+        optionsMetadata: {
+          assignmentRiskEvent: true,
+          assignmentRiskReasons: ["Short call assignment risk was flagged near exit."]
+        },
         pnl: -80,
         actualRMultiple: -0.5,
         outcome: "loss"

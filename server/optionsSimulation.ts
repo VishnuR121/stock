@@ -48,7 +48,9 @@ function buildPosition(
   const unrealizedPnLPct = Math.abs(entryValue) > 0 ? round(unrealizedPnL / Math.abs(entryValue), 4) : null;
   const daysToExpiration = getMinDte(legs, now);
   const quoteStatus = getQuoteStatus(legValues);
+  const assignmentRisk = getAssignmentRisk(legs, daysToExpiration);
   const warnings = buildWarnings(entry, legValues, quoteStatus);
+  for (const reason of assignmentRisk.reasons) warnings.push(reason);
   const exit = buildExitGuidance({
     entry,
     legs,
@@ -81,6 +83,8 @@ function buildPosition(
     actualRMultiple: entry.actualRMultiple,
     paperExecutionMode: entry.paperExecutionMode,
     quoteStatus,
+    assignmentRisk: assignmentRisk.active,
+    assignmentRiskReasons: assignmentRisk.reasons,
     exitUrgency: exit.urgency,
     suggestedAction: exit.suggestedAction,
     exitReasons: exit.reasons,
@@ -174,6 +178,22 @@ function buildWarnings(
     if (!value.hasQuote) warnings.add(`${value.leg.optionSymbol} is missing a current quote.`);
   }
   return [...warnings];
+}
+
+function getAssignmentRisk(legs: OptionLeg[], daysToExpiration: number | null): { active: boolean; reasons: string[] } {
+  const shortLegs = legs.filter((leg) => leg.side === "sell");
+  if (!shortLegs.length) return { active: false, reasons: [] };
+  if (daysToExpiration === null || daysToExpiration > WATCH_DTE) return { active: false, reasons: [] };
+  const reasons: string[] = [];
+  reasons.push(`Assignment risk is elevated because a short option leg has ${daysToExpiration} DTE.`);
+  for (const leg of shortLegs) {
+    if (leg.optionType === "call") reasons.push(`${leg.optionSymbol} is a short call; shares can be called away if assigned.`);
+    if (leg.optionType === "put") reasons.push(`${leg.optionSymbol} is a short put; assignment can require buying shares.`);
+  }
+  return {
+    active: reasons.length > 0,
+    reasons: [...new Set(reasons)]
+  };
 }
 
 function buildExitGuidance(input: {

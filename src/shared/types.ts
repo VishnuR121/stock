@@ -491,6 +491,8 @@ export interface SimulatedOptionsPosition {
   actualRMultiple?: number;
   paperExecutionMode?: PaperExecutionMode;
   quoteStatus: SimulatedOptionQuoteStatus;
+  assignmentRisk: boolean;
+  assignmentRiskReasons: string[];
   exitUrgency: ExitUrgency;
   suggestedAction: string;
   exitReasons: string[];

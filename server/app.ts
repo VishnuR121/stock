@@ -893,7 +893,18 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       outcome,
       realizedPnL: pnl,
       actualRMultiple,
-      exitThesis: optionalString(request.body?.exitThesis) ?? position.exitReasons[0]
+      exitThesis: optionalString(request.body?.exitThesis) ?? position.exitReasons[0],
+      optionsMetadata: {
+        ...(journal.find((entry) => entry.id === position.journalEntryId)?.optionsMetadata ?? {}),
+        assignmentRiskEvent: position.assignmentRisk,
+        assignmentRiskReasons: position.assignmentRiskReasons
+      },
+      strategyWarnings: [
+        ...new Set([
+          ...(journal.find((entry) => entry.id === position.journalEntryId)?.strategyWarnings ?? []),
+          ...position.assignmentRiskReasons
+        ])
+      ]
     });
 
     response.json({

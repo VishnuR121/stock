@@ -2423,6 +2423,7 @@ function OptionsSimulationPanel({
                 {position.maxProfit !== undefined && <span>Max profit {formatCurrency(position.maxProfit)}</span>}
                 <span>{formatDte(position.daysToExpiration)} DTE</span>
                 <span>{position.quoteStatus.replaceAll("_", " ")}</span>
+                {position.assignmentRisk && <span>Assignment risk</span>}
               </div>
               <div className="optionLegList compact">
                 {position.legs.map((leg) => (
@@ -2432,6 +2433,7 @@ function OptionsSimulationPanel({
                 ))}
               </div>
               <small>{position.exitReasons[0]}</small>
+              {position.assignmentRiskReasons[0] && <small className="warningText">{position.assignmentRiskReasons[0]}</small>}
               {position.warnings[0] && <small className="warningText">{position.warnings[0]}</small>}
               <label className="exitReasonSelect">
                 <span>Exit reason</span>
@@ -3598,6 +3600,7 @@ function JournalAnalyticsSummary({ analytics }: { analytics: JournalAnalytics | 
             <p key={stat.key}>{formatExpressionType(stat.key)}: {stat.trades} trades / {stat.averageR === null ? "--" : `${stat.averageR}R`}</p>
           ))}
           {optionsMetrics.averageDteAtEntry !== null && <p>Avg options DTE: {optionsMetrics.averageDteAtEntry}</p>}
+          {optionsMetrics.assignmentRiskEvents > 0 && <p>Assignment-risk events: {optionsMetrics.assignmentRiskEvents}</p>}
         </div>
       )}
     </section>

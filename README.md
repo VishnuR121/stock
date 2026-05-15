@@ -20,6 +20,7 @@ This is an educational research and paper-trading tool. It is not financial advi
 - Short stock/ETF paper trades when the paper order has a required stop, target, position cap, max-risk estimate, and Alpaca shortability/easy-to-borrow verification.
 - Options paper simulation for selected defined-risk or covered/cash-secured strategies: long calls, long puts, bull call debit spreads, bear put debit spreads, covered calls, and cash-secured puts.
 - Internal options simulation monitor with mark-to-market estimates, exposure by strategy/underlying/DTE, exit guidance, and explicit paper-simulation close flow.
+- Assignment-risk tracking for short-leg options simulations, including near-expiration monitor flags and journal analytics counts.
 - Paper trade journal, saved plans, analysis runs, equity position monitoring, options simulation monitoring, and journal analytics by expression type, underlying, regime, confidence, DTE bucket, option type, and spread/single-leg structure.
 - Options research views with contract pricing, DTE, liquidity, IV, Greeks when available, breakeven, and max-loss estimates.
 - Postgres/Supabase storage through Drizzle. Runtime JSON storage is disabled.
@@ -33,6 +34,7 @@ This is an educational research and paper-trading tool. It is not financial advi
 - Options paper simulations require paper-only confirmation, risk acceptance, event check, max-loss acknowledgement, internal-simulation acknowledgement, no-live-endpoint acknowledgement, liquidity checks, and contract data.
 - Options simulation creation checks open paper journal exposure, max open positions, max options contracts, and same-underlying strategy exposure before a new simulation is created.
 - Closing an options simulation updates only the internal paper journal. It does not submit broker options orders.
+- Assignment-risk flags are tracked for short option legs when the simulation monitor detects elevated assignment risk or the close path records it.
 - The kill switch blocks paper order submission while enabled.
 - AI explains structured quantitative inputs and deterministic expression output; it must not invent option contracts, invent prices, override max loss, hide warnings, override the kill switch, recommend live trading, or submit orders.
 - Backtest v1 currently validates long stock/ETF swing strategies using historical OHLCV data. It does not validate options, spreads, covered calls, cash-secured puts, short trades, or multi-leg positions.
