@@ -1050,9 +1050,9 @@ describe("API safety behavior", () => {
     expect(snapshotRequests).toBe(1);
   });
 
-  it("validates selected Algo option contracts into internal-simulation eligibility", async () => {
+  it("validates selected Algo option contracts into broker-paper eligibility and submits to Alpaca paper", async () => {
     const expiration = futureDateKey(45);
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
       const target = String(url);
       if (target.includes("/v2/account")) {
         return jsonResponse({
@@ -1062,6 +1062,13 @@ describe("API safety behavior", () => {
           portfolio_value: "100000",
           status: "ACTIVE",
           currency: "USD"
+        });
+      }
+      if (target.includes("/v2/orders") && init?.method === "POST") {
+        return jsonResponse({
+          id: "broker-options-order-1",
+          status: "accepted",
+          symbol: "AAPL260619C00155000"
         });
       }
       if (target.includes("/v2/positions") || target.includes("/v2/orders")) {
@@ -1135,15 +1142,15 @@ describe("API safety behavior", () => {
           maxLoss: 450,
           breakeven: 159.5,
           requiredCapital: 450,
-          paperExecutionMode: "internal_simulation"
+          paperExecutionMode: "broker_paper"
         }
       })
       .expect(200);
 
     expect(response.body.proposal.workflowStatus).toBe("paper_eligible");
-    expect(response.body.proposal.executionType).toBe("internal_options_simulation");
+    expect(response.body.proposal.executionType).toBe("broker_options_order");
     expect(response.body.proposal.selectedContracts[0].optionSymbol).toBe("AAPL260619C00155000");
-    expect(response.body.proposal.paperExecutionMode).toBe("internal_simulation");
+    expect(response.body.proposal.paperExecutionMode).toBe("broker_paper");
 
     const missingOptionAcknowledgements = await request(app)
       .post(`/api/algo/proposals/${proposal.id}/execute`)
@@ -1153,7 +1160,7 @@ describe("API safety behavior", () => {
         acceptedRisk: true
       })
       .expect(400);
-    expect(missingOptionAcknowledgements.body.error).toMatch(/max loss, internal simulation, and no-live-endpoint/i);
+    expect(missingOptionAcknowledgements.body.error).toMatch(/max loss, options paper fill or simulation, and no-live-endpoint/i);
 
     const executed = await request(app)
       .post(`/api/algo/proposals/${proposal.id}/execute`)
@@ -1166,7 +1173,8 @@ describe("API safety behavior", () => {
         noLiveEndpointAcknowledged: true
       })
       .expect(200);
-    expect(executed.body.proposal.workflowStatus).toBe("internally_simulated");
+    expect(executed.body.proposal.workflowStatus).toBe("paper_submitted");
+    expect(executed.body.order.id).toBe("broker-options-order-1");
   });
 
   it("keeps Algo option proposals blocked when selected contracts fail validation", async () => {
@@ -1266,18 +1274,21 @@ describe("API safety behavior", () => {
   it("reuses cached option ideas to reduce repeated option chain calls", async () => {
     let optionRequests = 0;
     let barRequests = 0;
+    const optionUrls: string[] = [];
+    const expiration = futureDateKey(30);
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       const target = String(url);
       if (target.includes("/v2/options/contracts")) {
         optionRequests += 1;
+        optionUrls.push(target);
         return jsonResponse({
           option_contracts: [
             {
-              symbol: "SPY260515C00600000",
+              symbol: "SPY260619C00600000",
               underlying_symbol: "SPY",
               type: "call",
-              expiration_date: "2026-05-15",
+              expiration_date: expiration,
               strike_price: "600",
               close_price: "2.5",
               open_interest: "1000"
@@ -1306,6 +1317,8 @@ describe("API safety behavior", () => {
     expect(second.body.cached).toBe(true);
     expect(optionRequests).toBe(1);
     expect(barRequests).toBe(1);
+    expect(optionUrls[0]).toContain("expiration_date_gte=");
+    expect(optionUrls[0]).toContain("expiration_date_lte=");
   });
 });
 

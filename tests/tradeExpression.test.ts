@@ -59,6 +59,34 @@ describe("trade expression engine", () => {
     expect(put?.breakeven).toBe(131.9);
   });
 
+  it("allows lower-DTE contracts when they are the best available but still warns", () => {
+    const result = buildTradeExpressionResult({
+      snapshot: makeBullishSnapshot(),
+      currentHoldings: [],
+      riskSettings: getDefaultRiskSettings(),
+      account: { equity: 100000, buyingPower: 100000, cash: 100000, paper: true },
+      options: [
+        makeOption({
+          symbol: "AAPL260517C00145000",
+          type: "call",
+          expirationDate: "2026-05-17",
+          strikePrice: 145,
+          closePrice: 1.8,
+          bidPrice: 1.7,
+          askPrice: 1.9,
+          openInterest: 500
+        })
+      ],
+      preference: "leverage",
+      now
+    });
+
+    const call = [result.recommendedExpression, ...result.alternatives].find((expression) => expression.expressionType === "long_call");
+    expect(call?.status).toBe("paper_trade_allowed");
+    expect(call?.dte).toBe(4);
+    expect(call?.volatilityWarnings.join(" ")).toMatch(/Short DTE/i);
+  });
+
   it("calculates bear put debit spread risk metrics for bearish setups", () => {
     const result = buildTradeExpressionResult({
       snapshot: makeBearishSnapshot(),

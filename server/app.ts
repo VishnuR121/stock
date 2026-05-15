@@ -31,6 +31,7 @@ import type {
   MarketRegimeLabel,
   MultiLegPaperOrderRequest,
   MultiLegPaperOrderValidationResult,
+  OptionIdea,
   PaperOrderRequest,
   PaperExecutionMode,
   PaperOrderValidationResult,
@@ -261,7 +262,7 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
   app.get("/api/options/:symbol", asyncHandler(async (request, response) => {
     const symbol = normalizeSymbol(request.params.symbol);
     const cachedIdeas = await store.getCachedOptionIdeas(symbol, OPTIONS_CACHE_MS);
-    if (cachedIdeas) {
+    if (cachedIdeas && hasForwardOptionsCoverage(cachedIdeas)) {
       response.json({ symbol, ideas: cachedIdeas, cached: true });
       return;
     }
@@ -435,13 +436,14 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       ...rawOrder,
       expressionType,
       underlyingSymbol: normalizeSymbol(String(rawOrder?.underlyingSymbol ?? proposal.symbol)),
-      timeHorizon: optionalString(rawOrder?.timeHorizon) ?? proposal.expectedHoldingPeriod ?? "30-60 DTE options proposal",
+      timeHorizon: optionalString(rawOrder?.timeHorizon) ?? proposal.expectedHoldingPeriod ?? "Flexible DTE options proposal",
       earningsChecked: true,
       confirmedPaperOnly: true,
       acceptedRisk: true,
       maxLossAcknowledged: true,
       paperSimulationAcknowledged: true,
       noLiveEndpointAcknowledged: true,
+      paperExecutionMode: "broker_paper",
       sourceAnalysisId: proposal.sourceAnalysisId,
       sourceSignalAsOf: proposal.signalAsOf,
       followedPlan: true
@@ -472,6 +474,8 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
     const validation = validateMultiLegPaperOrder(order, riskProfile, riskSettings, {
       buyingPower: account.buyingPower ?? account.cash ?? account.equity,
       alpacaPaperOnly,
+      optionsTradingLevel: account.optionsTradingLevel,
+      optionsApprovedLevel: account.optionsApprovedLevel,
       ...getOpenPaperOptionsExposure(journal, order.underlyingSymbol)
     });
     if (!knownContracts.length) {
@@ -485,7 +489,7 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
 
     const stats = getSelectedContractStats(order);
     const warnings = [...new Set([
-      ...proposal.warnings.filter((warning) => warning !== "Needs exact contract selection before paper simulation." && warning !== "No contract selected."),
+      ...proposal.warnings.filter((warning) => warning !== "Needs exact contract selection before paper simulation." && warning !== "Needs exact contract selection before paper options validation." && warning !== "No contract selected."),
       ...validation.warnings,
       ...validation.errors
     ])].slice(0, 10);
@@ -519,7 +523,7 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       status: "queued",
       workflowStatus: "paper_eligible",
       executable: true,
-      executionType: "internal_options_simulation",
+      executionType: "broker_options_order",
       expressionType,
       selectedContracts: validation.order.legs,
       multiLegOrder: validation.order,
@@ -532,10 +536,10 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       paperExecutionMode: validation.order.paperExecutionMode,
       validation,
       blockedReasons: [],
-      howToFix: ["Review warnings, confirm paper-only execution, then approve the internal simulation from this Algo card."],
+      howToFix: ["Review warnings, confirm paper-only execution, then approve the broker-paper options order from this Algo card."],
       warnings: [...new Set([
         ...warnings,
-        "Options are internally simulated paper trades, not broker options submissions."
+        "Options will be submitted to the Alpaca paper endpoint after manual confirmation; paper fills may differ from live fills."
       ])].slice(0, 10)
     });
     response.json({ proposal: updated, validation });
@@ -559,11 +563,12 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       response.status(400).json({ error: "Confirm earnings/event timing, paper-only execution, and accepted risk before placing." });
       return;
     }
+    const isOptionsExecution = proposal.executionType === "broker_options_order" || proposal.executionType === "internal_options_simulation";
     if (
-      proposal.executionType === "internal_options_simulation"
+      isOptionsExecution
       && (!request.body?.maxLossAcknowledged || !request.body?.paperSimulationAcknowledged || !request.body?.noLiveEndpointAcknowledged)
     ) {
-      response.status(400).json({ error: "Confirm max loss, internal simulation, and no-live-endpoint acknowledgements before creating an options paper simulation." });
+      response.status(400).json({ error: "Confirm max loss, options paper fill or simulation, and no-live-endpoint acknowledgements before creating an options paper order." });
       return;
     }
 
@@ -607,10 +612,10 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       brokerOrder = await alpaca.placePaperBracketOrder(validation.order);
       journalAction = order.side === "sell" ? "paper_short_candidate" : "paper_long_candidate";
       entryPrice = referencePrice ?? undefined;
-    } else if (proposal.executionType === "internal_options_simulation" && proposal.multiLegOrder) {
+    } else if (isOptionsExecution && proposal.multiLegOrder) {
       const order: MultiLegPaperOrderRequest = {
         ...proposal.multiLegOrder,
-        timeHorizon: proposal.horizon === "options_short_term" ? "30-60 DTE options proposal" : proposal.expectedHoldingPeriod,
+        timeHorizon: proposal.horizon === "options_short_term" ? "Flexible DTE options proposal" : proposal.expectedHoldingPeriod,
         earningsChecked: request.body.earningsChecked === true,
         confirmedPaperOnly: request.body.confirmedPaperOnly === true,
         acceptedRisk: request.body.acceptedRisk === true,
@@ -634,6 +639,8 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       const optionValidation = validateMultiLegPaperOrder(order, riskProfile, riskSettings, {
         buyingPower: account.buyingPower ?? account.cash ?? account.equity,
         alpacaPaperOnly: isPaperAlpacaUrl(config.alpacaPaperBaseUrl),
+        optionsTradingLevel: account.optionsTradingLevel,
+        optionsApprovedLevel: account.optionsApprovedLevel,
         ...getOpenPaperOptionsExposure(journal, order.underlyingSymbol)
       });
       if (!optionValidation.ok || !optionValidation.order) {
@@ -647,13 +654,31 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
         response.status(400).json({ proposal: updated, validation: optionValidation });
         return;
       }
-      const simulatedOrder = {
-        id: `sim-options-${optionValidation.order.underlyingSymbol}-${Date.now()}`,
-        status: "internally_simulated_paper",
-        paperExecutionMode: optionValidation.order.paperExecutionMode,
-        expressionType: optionValidation.order.expressionType,
-        legs: optionValidation.order.legs
-      };
+      const isBrokerPaperOptions = optionValidation.order.paperExecutionMode === "broker_paper";
+      let optionPaperOrder: unknown;
+      try {
+        optionPaperOrder = isBrokerPaperOptions
+          ? await alpaca.placePaperOptionsOrder(optionValidation.order)
+          : {
+              id: `sim-options-${optionValidation.order.underlyingSymbol}-${Date.now()}`,
+              status: "internally_simulated_paper",
+              paperExecutionMode: optionValidation.order.paperExecutionMode,
+              expressionType: optionValidation.order.expressionType,
+              legs: optionValidation.order.legs
+            };
+      } catch (error) {
+        const message = getUnknownErrorMessage(error, "Alpaca paper options order was rejected.");
+        const updated = await store.updateAlgoTradeProposal(proposal.id, {
+          status: "blocked",
+          workflowStatus: "blocked",
+          validation: optionValidation,
+          blockedReasons: [message],
+          warnings: [...new Set([...proposal.warnings, message])]
+        });
+        response.status(502).json({ proposal: updated, validation: optionValidation, error: message });
+        return;
+      }
+      const brokerOrderId = getBrokerOrderId(optionPaperOrder);
       await store.addJournalEntry({
         symbol: optionValidation.order.underlyingSymbol,
         planId: proposal.id,
@@ -674,23 +699,24 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
         breakeven: optionValidation.order.breakeven,
         requiredCapital: optionValidation.order.requiredCapital,
         paperExecutionMode: optionValidation.order.paperExecutionMode,
-        brokerOrderIds: [],
+        brokerOrderIds: isBrokerPaperOptions && brokerOrderId ? [brokerOrderId] : [],
         optionsMetadata: {
           estimatedDebit: optionValidation.order.estimatedDebit,
           estimatedCredit: optionValidation.order.estimatedCredit,
-          simulatedOrderId: simulatedOrder.id
+          brokerPaperOrder: isBrokerPaperOptions,
+          simulatedOrderId: isBrokerPaperOptions ? undefined : getBrokerOrderId(optionPaperOrder)
         },
         strategyWarnings: optionValidation.warnings,
         strategyCategory: optionValidation.order.expressionType
       });
       const updated = await store.updateAlgoTradeProposal(proposal.id, {
         status: "placed",
-        workflowStatus: "internally_simulated",
+        workflowStatus: isBrokerPaperOptions ? "paper_submitted" : "internally_simulated",
         validation: optionValidation,
-        brokerOrder: simulatedOrder,
+        brokerOrder: optionPaperOrder,
         reviewedAt: new Date().toISOString()
       });
-      response.json({ proposal: updated, validation: optionValidation, order: simulatedOrder });
+      response.json({ proposal: updated, validation: optionValidation, order: optionPaperOrder });
       return;
     } else if (proposal.executionType === "long_option" && proposal.optionOrder) {
       const updated = await store.updateAlgoTradeProposal(proposal.id, {
@@ -775,6 +801,10 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       maxOpenPositions: optionalNumber(request.body?.maxOpenPositions) ?? current.maxOpenPositions,
       maxOptionsContracts: optionalNumber(request.body?.maxOptionsContracts) ?? current.maxOptionsContracts,
       maxStrategyExposurePct: optionalNumber(request.body?.maxStrategyExposurePct) ?? current.maxStrategyExposurePct,
+      minOptionsDte: optionalNumber(request.body?.minOptionsDte) ?? current.minOptionsDte,
+      maxOptionsDte: optionalNumber(request.body?.maxOptionsDte) ?? current.maxOptionsDte,
+      preferredOptionsDteMin: optionalNumber(request.body?.preferredOptionsDteMin) ?? current.preferredOptionsDteMin,
+      preferredOptionsDteMax: optionalNumber(request.body?.preferredOptionsDteMax) ?? current.preferredOptionsDteMax,
       allowZeroDte: typeof request.body?.allowZeroDte === "boolean"
         ? request.body.allowZeroDte
         : current.allowZeroDte,
@@ -975,6 +1005,17 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       response.status(400).json({
         ok: false,
         errors: parsed.error.issues.map((issue) => issue.message),
+        warnings: [],
+        estimatedNotional: null,
+        estimatedRisk: null
+      });
+      return;
+    }
+
+    if (parsed.data.paperExecutionMode !== "internal_simulation") {
+      response.status(400).json({
+        ok: false,
+        errors: ["This endpoint creates internal options simulations only. Use Algo proposal approval for broker-paper options orders."],
         warnings: [],
         estimatedNotional: null,
         estimatedRisk: null
@@ -1441,7 +1482,10 @@ function getHeldLongShares(positions: unknown[], symbol: string): number {
 function getOpenPaperOptionsExposure(journal: TradeJournalEntry[], underlyingSymbol: string) {
   const normalizedUnderlying = normalizeSymbol(underlyingSymbol);
   const openEntries = journal.filter((entry) => entry.status === "paper_open");
-  const openOptionsEntries = openEntries.filter((entry) => entry.paperExecutionMode === "internal_simulation" && entry.optionLegs?.length);
+  const openOptionsEntries = openEntries.filter((entry) => (
+    (entry.paperExecutionMode === "internal_simulation" || entry.paperExecutionMode === "broker_paper")
+    && entry.optionLegs?.length
+  ));
   return {
     openPaperPositionCount: openEntries.length,
     existingOptionsContracts: openOptionsEntries.reduce((sum, entry) => (
@@ -1501,9 +1545,14 @@ function getPaperOrderJournalNotes(order: PaperOrderRequest, brokerOrder: unknow
 }
 
 function getMultiLegPaperOrderJournalNotes(order: MultiLegPaperOrderRequest): string {
+  const brokerPaper = order.paperExecutionMode === "broker_paper";
   const pieces = [
-    "Options paper trade created as an internal simulation.",
-    "No live options order or broker options order was submitted.",
+    brokerPaper
+      ? "Options paper order submitted to the Alpaca paper endpoint."
+      : "Options paper trade created as an internal simulation.",
+    brokerPaper
+      ? "No live options order was submitted."
+      : "No live options order or broker options order was submitted.",
     `${order.expressionType.replaceAll("_", " ")} with ${order.legs.length} leg${order.legs.length === 1 ? "" : "s"}.`,
     `Max loss acknowledged: ${order.maxLoss}.`
   ];
@@ -1517,6 +1566,10 @@ function getBrokerOrderId(order: unknown): string | null {
   if (!order || typeof order !== "object") return null;
   const id = (order as { id?: unknown; client_order_id?: unknown }).id ?? (order as { client_order_id?: unknown }).client_order_id;
   return typeof id === "string" ? id : null;
+}
+
+function getUnknownErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 function enforceSafetyOnVerdict<T extends { action: TradeAction; warnings: string[] }>(verdict: T, blockers: Array<{ severity: string; message: string }>): T {
@@ -1624,7 +1677,7 @@ async function getContextForSymbol(
 
 async function getOptionsForExpression(store: AppStore, alpaca: AlpacaClient, symbol: string) {
   const cached = await store.getCachedOptionIdeas(symbol, OPTIONS_CACHE_MS);
-  if (cached) return cached;
+  if (cached && hasForwardOptionsCoverage(cached)) return cached;
   try {
     const [ideas, bars] = await Promise.all([
       alpaca.getOptionIdeas(symbol),
@@ -1636,6 +1689,20 @@ async function getOptionsForExpression(store: AppStore, alpaca: AlpacaClient, sy
   } catch {
     return [];
   }
+}
+
+function hasForwardOptionsCoverage(options: OptionIdea[], now = new Date()): boolean {
+  return options.some((option) => {
+    const dte = getOptionIdeaDte(option, now);
+    return dte >= 1;
+  });
+}
+
+function getOptionIdeaDte(option: OptionIdea, now: Date): number {
+  if (typeof option.daysToExpiration === "number" && Number.isFinite(option.daysToExpiration)) {
+    return option.daysToExpiration;
+  }
+  return getLegDte(option.expirationDate, now);
 }
 
 async function getOptionsByUnderlyingForOpenSimulations(

@@ -39,7 +39,7 @@ export type AlgoProposalWorkflowStatus =
   | "paper_eligible"
   | "paper_submitted"
   | "internally_simulated";
-export type AlgoExecutionType = "long_stock_bracket" | "short_stock_bracket" | "internal_options_simulation" | "long_option" | "research_only";
+export type AlgoExecutionType = "long_stock_bracket" | "short_stock_bracket" | "broker_options_order" | "internal_options_simulation" | "long_option" | "research_only";
 export type ExitUrgency = "hold" | "watch" | "exit";
 export type OpportunityCategory =
   | "bullish_long"
@@ -179,6 +179,10 @@ export interface RiskSettings {
   maxOptionsContracts?: number;
   maxStrategyExposurePct?: number;
   allowZeroDte?: boolean;
+  minOptionsDte?: number;
+  maxOptionsDte?: number;
+  preferredOptionsDteMin?: number;
+  preferredOptionsDteMax?: number;
 }
 
 export interface TradePlan {
@@ -882,6 +886,12 @@ export interface OptionSelectionDiagnostics {
   priceEligible: number;
   openInterestEligible: number;
   preferredDteEligible: number;
+  dteWindow?: {
+    min: number;
+    max: number;
+    preferredMin: number;
+    preferredMax: number;
+  };
   candidatesConsidered: number;
   selectedSymbol?: string;
   selectedExpiration?: string;
@@ -968,6 +978,8 @@ export interface BrokerAccountSnapshot {
   buyingPower: number | null;
   portfolioValue: number | null;
   paper: boolean;
+  optionsTradingLevel?: number | null;
+  optionsApprovedLevel?: number | null;
 }
 
 export interface BrokerAssetSnapshot {

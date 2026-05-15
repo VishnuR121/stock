@@ -85,7 +85,11 @@ export function getDefaultRiskSettings(): RiskSettings {
     maxOpenPositions: 12,
     maxOptionsContracts: 4,
     maxStrategyExposurePct: 0.1,
-    allowZeroDte: false
+    allowZeroDte: false,
+    minOptionsDte: 1,
+    maxOptionsDte: 365,
+    preferredOptionsDteMin: 14,
+    preferredOptionsDteMax: 60
   };
 }
 

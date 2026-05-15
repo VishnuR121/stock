@@ -648,7 +648,9 @@ export function App() {
       setAlgoExecutionReview(null);
       setMessage(result.proposal.workflowStatus === "internally_simulated"
         ? `${proposal.symbol} options paper simulation created from approved algo proposal.`
-        : `${proposal.symbol} paper order placed from approved algo proposal.`);
+        : result.proposal.executionType === "broker_options_order"
+          ? `${proposal.symbol} broker-paper options order submitted from approved algo proposal.`
+          : `${proposal.symbol} paper order placed from approved algo proposal.`);
       await Promise.all([loadAccount(), loadPositions(), loadJournal(), loadPositionMonitor(), loadOptionsSimulation()]);
     } catch (error) {
       setMessage(getErrorMessage(error));
@@ -714,7 +716,7 @@ export function App() {
       setAlgoProposals((current) => current.map((item) => item.id === proposal.id ? result.proposal : item));
       setContractSelectorProposal(null);
       setMessage(result.proposal.workflowStatus === "paper_eligible"
-        ? `${proposal.symbol} contracts selected and validated. The Algo proposal is paper eligible for internal simulation.`
+        ? `${proposal.symbol} contracts selected and validated. The Algo proposal is paper eligible for broker-paper options submission.`
         : `${proposal.symbol} contracts selected, but validation blocked the proposal.`);
     } catch (error) {
       setMessage(getErrorMessage(error));
@@ -2274,7 +2276,7 @@ function AlgoCommandCenter({
                 <div className="optionLegList compact">
                   {proposal.selectedContracts.map((leg) => (
                     <span key={`${proposal.id}-${leg.optionSymbol}-${leg.side}`}>
-                      {leg.side.toUpperCase()} {leg.quantity} {leg.optionType} {leg.strike} {leg.expiration}
+                      {formatOptionLegLabel(leg)}
                     </span>
                   ))}
                 </div>
@@ -2615,7 +2617,7 @@ function OptionsSimulationPanel({
               <div className="optionLegList compact">
                 {position.legs.map((leg) => (
                   <span key={`${position.id}-${leg.optionSymbol}-${leg.side}`}>
-                    {leg.side.toUpperCase()} {leg.quantity} {leg.optionType} {leg.strike} {leg.expiration}
+                    {formatOptionLegLabel(leg)}
                   </span>
                 ))}
               </div>
@@ -2930,8 +2932,8 @@ function TradeExpressionPanel({
               {selected.multiLegOrder.legs.map((leg) => (
                 <div key={`${leg.optionSymbol}-${leg.side}`}>
                   <span>{leg.side.toUpperCase()} {leg.optionType}</span>
-                  <strong>{leg.optionSymbol}</strong>
-                  <small>{leg.expiration} / {formatCurrency(leg.strike)} / mid {formatOptionalCurrency(leg.estimatedMid ?? null)}</small>
+                  <strong>{formatOptionLegContractName(leg)}</strong>
+                  <small>Broker symbol {leg.optionSymbol} / mid {formatOptionalCurrency(leg.estimatedMid ?? null)}</small>
                 </div>
               ))}
             </div>
@@ -2952,13 +2954,14 @@ function TradeExpressionPanel({
 function OptionSelectionDiagnosticsCard({ expression }: { expression: TradeExpression }) {
   const diagnostics = expression.optionSelectionDiagnostics;
   if (!diagnostics) return null;
+  const dteWindow = diagnostics.dteWindow ?? { min: 1, max: 365, preferredMin: 14, preferredMax: 60 };
   const rows = [
     ["Loaded", diagnostics.totalContracts],
     [`${diagnostics.optionType}s`, diagnostics.typeMatches],
-    ["21-90 DTE", diagnostics.dteEligible],
+    [`${dteWindow.min}-${dteWindow.max} DTE`, diagnostics.dteEligible],
     ["Priced", diagnostics.priceEligible],
     ["Open interest", diagnostics.openInterestEligible],
-    ["30-60 DTE", diagnostics.preferredDteEligible],
+    [`${dteWindow.preferredMin}-${dteWindow.preferredMax} DTE`, diagnostics.preferredDteEligible],
     ["Considered", diagnostics.candidatesConsidered]
   ];
 
@@ -3318,8 +3321,9 @@ function ContractSelectorLegCard({ option }: { option: OptionIdea }) {
   return (
     <article className="contractLegCard">
       <div>
-        <span>{option.type.toUpperCase()} {formatCurrency(option.strikePrice)} / {option.expirationDate}</span>
-        <strong>{option.symbol}</strong>
+        <span>{formatOptionContractType(option)} / {formatDte(option.daysToExpiration)} DTE</span>
+        <strong>{formatOptionIdeaName(option)}</strong>
+        <small>Broker symbol {option.symbol}</small>
       </div>
       <div className="contractLegMetrics">
         <span>DTE {formatDte(option.daysToExpiration)}</span>
@@ -3349,7 +3353,8 @@ function AlgoExecutionReviewModal({
   onClose: () => void;
   onSubmit: (confirmations: AlgoExecutionConfirmations) => void;
 }) {
-  const isOptions = proposal.executionType === "internal_options_simulation";
+  const isOptions = proposal.executionType === "internal_options_simulation" || proposal.executionType === "broker_options_order" || isOptionsAlgoProposal(proposal);
+  const isBrokerPaperOptions = proposal.executionType === "broker_options_order" || proposal.paperExecutionMode === "broker_paper";
   const [confirmations, setConfirmations] = useState<AlgoExecutionConfirmations>({
     earningsChecked: false,
     confirmedPaperOnly: false,
@@ -3383,7 +3388,7 @@ function AlgoExecutionReviewModal({
           </div>
           <div>
             <dt>Mode</dt>
-            <dd>{formatPaperMode(proposal.paperExecutionMode ?? (isOptions ? "internal_simulation" : "broker_paper"))}</dd>
+            <dd>{formatPaperMode(proposal.paperExecutionMode ?? "broker_paper")}</dd>
           </div>
           <div>
             <dt>Capital</dt>
@@ -3407,7 +3412,7 @@ function AlgoExecutionReviewModal({
           <div className="optionLegList compact">
             {proposal.selectedContracts.map((leg) => (
               <span key={`${proposal.id}-review-${leg.optionSymbol}-${leg.side}`}>
-                {leg.side.toUpperCase()} {leg.quantity} {leg.optionType} {leg.strike} {leg.expiration}
+                {formatOptionLegLabel(leg)}
               </span>
             ))}
           </div>
@@ -3441,7 +3446,7 @@ function AlgoExecutionReviewModal({
               </label>
               <label>
                 <input type="checkbox" checked={confirmations.paperSimulationAcknowledged} onChange={(event) => update({ paperSimulationAcknowledged: event.target.checked })} />
-                <span>Internal simulation acknowledged</span>
+                <span>{isBrokerPaperOptions ? "Broker-paper option fills acknowledged" : "Internal simulation acknowledged"}</span>
               </label>
               <label>
                 <input type="checkbox" checked={confirmations.noLiveEndpointAcknowledged} onChange={(event) => update({ noLiveEndpointAcknowledged: event.target.checked })} />
@@ -3453,7 +3458,7 @@ function AlgoExecutionReviewModal({
 
         <button className="wideButton danger" onClick={() => onSubmit(confirmations)} disabled={busy || !canSubmit}>
           {busy ? <Loader2 className="spin" size={17} /> : <CheckCircle2 size={17} />}
-          <span>{isOptions ? "Create internal simulation" : "Submit broker paper order"}</span>
+          <span>{isOptions ? (isBrokerPaperOptions ? "Submit broker-paper options order" : "Create internal simulation") : "Submit broker paper order"}</span>
         </button>
       </section>
     </div>
@@ -3529,8 +3534,8 @@ function OptionsPaperOrderModal({
           {order.legs.map((leg) => (
             <div key={`${leg.optionSymbol}-${leg.side}`}>
               <span>{leg.side.toUpperCase()} {leg.optionType}</span>
-              <strong>{leg.optionSymbol}</strong>
-              <small>{leg.expiration} / {formatCurrency(leg.strike)} / bid {formatOptionalCurrency(leg.bid ?? null)} / ask {formatOptionalCurrency(leg.ask ?? null)}</small>
+              <strong>{formatOptionLegContractName(leg)}</strong>
+              <small>Broker symbol {leg.optionSymbol} / bid {formatOptionalCurrency(leg.bid ?? null)} / ask {formatOptionalCurrency(leg.ask ?? null)}</small>
             </div>
           ))}
         </div>
@@ -3766,6 +3771,10 @@ function RiskSettingsPanel({
       maxOpenPositions: Math.max(1, Math.round(draft.maxOpenPositions ?? 12)),
       maxOptionsContracts: Math.max(0, Math.round(draft.maxOptionsContracts ?? 4)),
       maxStrategyExposurePct: clampFraction(draft.maxStrategyExposurePct ?? draft.maxPositionPct, 0.001, 1),
+      minOptionsDte: Math.max(1, Math.round(draft.minOptionsDte ?? 1)),
+      maxOptionsDte: Math.max(Math.round(draft.maxOptionsDte ?? 365), Math.round(draft.minOptionsDte ?? 1) + 1),
+      preferredOptionsDteMin: Math.max(1, Math.round(draft.preferredOptionsDteMin ?? 14)),
+      preferredOptionsDteMax: Math.max(Math.round(draft.preferredOptionsDteMax ?? 60), Math.round(draft.preferredOptionsDteMin ?? 14) + 1),
       allowZeroDte: draft.allowZeroDte === true
     });
   };
@@ -4312,7 +4321,12 @@ function OptionsTable({ options }: { options: OptionIdea[] }) {
         <tbody>
           {rows.map((option) => (
             <tr key={option.symbol}>
-              <td>{option.symbol}</td>
+              <td>
+                <div className="contractNameCell">
+                  <strong>{formatOptionIdeaName(option)}</strong>
+                  <small>{option.symbol}</small>
+                </div>
+              </td>
               <td>{option.type}</td>
               <td>{option.expirationDate}</td>
               <td>{formatDte(option.daysToExpiration)}</td>
@@ -4894,8 +4908,8 @@ function getSortedSelectorOptions(options: OptionIdea[]): OptionIdea[] {
 }
 
 function isPreferredSelectorOption(option: OptionIdea): boolean {
-  return (option.daysToExpiration ?? 0) >= 21
-    && (option.daysToExpiration ?? 0) <= 90
+  return (option.daysToExpiration ?? 0) >= 14
+    && (option.daysToExpiration ?? 0) <= 60
     && getOptionUnitPrice(option) !== null
     && (option.openInterest ?? 0) >= 100;
 }
@@ -4935,7 +4949,7 @@ function buildAlgoContractOrder(
       maxProfit: undefined,
       breakeven: roundMoney(config.expressionType === "long_call" ? primary.strikePrice + primaryPrice : primary.strikePrice - primaryPrice),
       requiredCapital: debit,
-      paperExecutionMode: "internal_simulation"
+      paperExecutionMode: "broker_paper"
     };
   }
 
@@ -4951,7 +4965,7 @@ function buildAlgoContractOrder(
       maxProfit: roundMoney(Math.max(0, width - debit)),
       breakeven: roundMoney(primary.strikePrice + debit / multiplier),
       requiredCapital: debit,
-      paperExecutionMode: "internal_simulation"
+      paperExecutionMode: "broker_paper"
     };
   }
 
@@ -4967,7 +4981,7 @@ function buildAlgoContractOrder(
       maxProfit: roundMoney(Math.max(0, width - debit)),
       breakeven: roundMoney(primary.strikePrice - debit / multiplier),
       requiredCapital: debit,
-      paperExecutionMode: "internal_simulation"
+      paperExecutionMode: "broker_paper"
     };
   }
 
@@ -4983,7 +4997,7 @@ function buildAlgoContractOrder(
       maxProfit: credit,
       breakeven: roundMoney(Math.max(0.01, requiredCapital / multiplier - primaryPrice)),
       requiredCapital,
-      paperExecutionMode: "internal_simulation"
+      paperExecutionMode: "broker_paper"
     };
   }
 
@@ -4999,7 +5013,7 @@ function buildAlgoContractOrder(
       maxProfit: credit,
       breakeven: roundMoney(Math.max(0.01, primary.strikePrice - primaryPrice)),
       requiredCapital,
-      paperExecutionMode: "internal_simulation"
+      paperExecutionMode: "broker_paper"
     };
   }
 
@@ -5059,28 +5073,55 @@ function getSelectorWarnings(
   if (!primary) warnings.push("No contract selected.");
   if (config.secondary && !secondary) warnings.push("Select both compatible spread legs.");
   for (const option of [primary, secondary].filter(Boolean) as OptionIdea[]) {
-    if ((option.daysToExpiration ?? 0) <= 0) warnings.push(`${option.symbol} is 0DTE or expired; validation will block it by default.`);
-    if (getOptionUnitPrice(option) === null) warnings.push(`${option.symbol} is missing bid/ask, mid, or last pricing.`);
-    if (option.openInterest === null || option.openInterest === undefined) warnings.push(`${option.symbol} is missing open interest.`);
-    if ((option.openInterest ?? 0) > 0 && (option.openInterest ?? 0) < 100) warnings.push(`${option.symbol} has low open interest.`);
+    const contractName = formatOptionIdeaName(option);
+    if ((option.daysToExpiration ?? 0) <= 0) warnings.push(`${contractName} is 0DTE or expired; validation will block it by default.`);
+    if ((option.daysToExpiration ?? 0) > 0 && (option.daysToExpiration ?? 0) < 7) warnings.push(`${contractName} is below 7 DTE; validation can allow it, but theta decay and gap risk are higher.`);
+    if (getOptionUnitPrice(option) === null) warnings.push(`${contractName} is missing bid/ask, mid, or last pricing.`);
+    if (option.openInterest === null || option.openInterest === undefined) warnings.push(`${contractName} is missing open interest.`);
+    if ((option.openInterest ?? 0) > 0 && (option.openInterest ?? 0) < 100) warnings.push(`${contractName} has low open interest.`);
     const spreadPct = getOptionSpreadPct(option);
-    if (spreadPct !== null && spreadPct > 0.2) warnings.push(`${option.symbol} has a wide bid/ask spread.`);
+    if (spreadPct !== null && spreadPct > 0.2) warnings.push(`${contractName} has a wide bid/ask spread.`);
   }
   if (order?.legs.some((leg) => leg.side === "sell")) warnings.push("Short option legs carry assignment risk; validation still blocks naked/undefined-risk structures.");
+  if (order?.paperExecutionMode === "broker_paper") warnings.push("This will validate for Alpaca broker-paper options submission; paper fills may differ from live fills.");
   if (order?.paperExecutionMode === "internal_simulation") warnings.push("This will validate for internal simulation only, not broker options submission.");
   return [...new Set(warnings)].slice(0, 6);
 }
 
 function formatContractOptionLabel(option: OptionIdea): string {
   return [
-    option.symbol,
-    option.expirationDate,
-    `${formatCurrency(option.strikePrice)} ${option.type}`,
+    formatOptionIdeaName(option),
     `${formatDte(option.daysToExpiration)} DTE`,
     `mid ${formatOptionalCurrency(getOptionUnitPrice(option))}`,
     `OI ${option.openInterest ?? "--"}`,
     `vol ${option.volume ?? "--"}`
   ].join(" / ");
+}
+
+function formatOptionIdeaName(option: OptionIdea): string {
+  return `${option.underlyingSymbol} ${formatOptionExpiration(option.expirationDate)} ${formatCurrency(option.strikePrice)} ${option.type === "call" ? "Call" : "Put"}`;
+}
+
+function formatOptionLegContractName(leg: OptionLeg): string {
+  return `${leg.underlyingSymbol} ${formatOptionExpiration(leg.expiration)} ${formatCurrency(leg.strike)} ${leg.optionType === "call" ? "Call" : "Put"}`;
+}
+
+function formatOptionLegLabel(leg: OptionLeg): string {
+  return `${leg.side.toUpperCase()} ${leg.quantity} ${formatOptionLegContractName(leg)}`;
+}
+
+function formatOptionContractType(option: OptionIdea): string {
+  return `${option.type === "call" ? "Call" : "Put"} ${formatCurrency(option.strikePrice)} ${formatOptionExpiration(option.expirationDate)}`;
+}
+
+function formatOptionExpiration(expiration: string): string {
+  const date = new Date(`${expiration}T00:00:00`);
+  if (!Number.isFinite(date.getTime())) return expiration;
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  });
 }
 
 function roundMoney(value: number): number {

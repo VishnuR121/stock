@@ -2689,8 +2689,21 @@ th {
 }
 
 .contractLegCard span,
-.contractLegCard strong {
+.contractLegCard strong,
+.contractLegCard small,
+.contractNameCell {
   overflow-wrap: anywhere;
+}
+
+.contractLegCard small,
+.contractNameCell small {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.contractNameCell {
+  display: grid;
+  gap: 2px;
 }
 
 .contractLegCard span {

@@ -217,6 +217,8 @@ export function validateMultiLegPaperOrder(
     openPaperPositionCount?: number;
     existingOptionsContracts?: number;
     existingUnderlyingRequiredCapital?: number;
+    optionsTradingLevel?: number | null;
+    optionsApprovedLevel?: number | null;
   } = {}
 ): MultiLegPaperOrderValidationResult {
   const parsed = multiLegPaperOrderSchema.safeParse(input);
@@ -247,16 +249,28 @@ export function validateMultiLegPaperOrder(
   const totalContracts = getTotalContracts(order);
 
   if (riskSettings.killSwitchEnabled) errors.push("Paper order entry is disabled because the kill switch is enabled.");
-  if (options.alpacaPaperOnly === false) errors.push("Live Alpaca endpoints are blocked. Use the paper endpoint before paper options simulation.");
+  if (options.alpacaPaperOnly === false) errors.push("Live Alpaca endpoints are blocked. Use the paper endpoint before paper options orders or simulations.");
   if (!order.confirmedPaperOnly) errors.push("Confirm this is paper-only options research.");
   if (!order.acceptedRisk) errors.push("Confirm that you accept the defined max-loss risk plan.");
   if (!order.earningsChecked) errors.push("Confirm that you checked earnings or event timing before submitting.");
   if (!order.maxLossAcknowledged) errors.push("Acknowledge the calculated max loss before creating a paper options entry.");
-  if (!order.paperSimulationAcknowledged) errors.push("Acknowledge that options paper fills are internal simulations and may differ from live fills.");
+  if (!order.paperSimulationAcknowledged) {
+    errors.push(order.paperExecutionMode === "broker_paper"
+      ? "Acknowledge that broker-paper option fills are simulations and may differ from live fills."
+      : "Acknowledge that options paper fills are internal simulations and may differ from live fills.");
+  }
   if (!order.noLiveEndpointAcknowledged) errors.push("Acknowledge that no live endpoint or live options order is being used.");
-  if (order.paperExecutionMode === "broker_paper") errors.push("Broker-paper options submission is not implemented yet; use internal simulation or research-only.");
   if (order.paperExecutionMode === "research_only") errors.push("Research-only expressions cannot create a paper trade.");
-  if (!isAllowedOptionsExpression(order.expressionType)) errors.push("This expression type is not enabled for options paper simulation.");
+  if (!isAllowedOptionsExpression(order.expressionType)) errors.push("This expression type is not enabled for options paper trading.");
+  if (order.paperExecutionMode === "broker_paper") {
+    const optionsLevel = options.optionsApprovedLevel ?? options.optionsTradingLevel;
+    const requiredLevel = getRequiredOptionsLevel(order.expressionType);
+    if (typeof optionsLevel === "number" && optionsLevel < requiredLevel) {
+      errors.push(`Alpaca account options level ${optionsLevel} is below the required level ${requiredLevel} for ${order.expressionType.replaceAll("_", " ")}.`);
+    } else if (optionsLevel === null || optionsLevel === undefined) {
+      warnings.push("Alpaca options approval level was not reported; the broker paper endpoint may still reject the order.");
+    }
+  }
   if (order.maxLoss > maxRisk) errors.push(`Estimated max loss exceeds max per-trade risk of ${round(maxRisk, 2)}.`);
   if (order.requiredCapital > maxStrategyExposure) errors.push(`Required capital exceeds strategy exposure cap of ${round(maxStrategyExposure, 2)}.`);
   if (existingUnderlyingRequiredCapital + order.requiredCapital > maxStrategyExposure) {
@@ -274,18 +288,25 @@ export function validateMultiLegPaperOrder(
 
   for (const leg of order.legs) {
     const dte = getLegDte(leg.expiration, now);
+    const legName = formatOptionLegName(leg);
     if (dte <= 0 && riskSettings.allowZeroDte !== true) errors.push("0DTE options are blocked by default.");
-    if (!leg.limitPrice && !leg.estimatedMid && !leg.last) errors.push(`Missing price for ${leg.optionSymbol}.`);
-    if (leg.openInterest === null || leg.openInterest === undefined) errors.push(`Open interest is required for ${leg.optionSymbol}.`);
-    if ((leg.openInterest ?? 0) < 100) warnings.push(`${leg.optionSymbol} has low open interest.`);
-    if (leg.volume !== null && leg.volume !== undefined && leg.volume < 10) warnings.push(`${leg.optionSymbol} has low option volume.`);
+    if (dte > 0 && dte < 7) {
+      warnings.push(`${legName} is below 7 DTE; short-dated options can decay quickly and gap risk is higher.`);
+    }
+    if (dte > 0 && dte < (riskSettings.minOptionsDte ?? 1)) {
+      warnings.push(`${legName} is below the minimum configured ${(riskSettings.minOptionsDte ?? 1)} DTE floor.`);
+    }
+    if (!leg.limitPrice && !leg.estimatedMid && !leg.last) errors.push(`Missing price for ${legName}.`);
+    if (leg.openInterest === null || leg.openInterest === undefined) errors.push(`Open interest is required for ${legName}.`);
+    if ((leg.openInterest ?? 0) < 100) warnings.push(`${legName} has low open interest.`);
+    if (leg.volume !== null && leg.volume !== undefined && leg.volume < 10) warnings.push(`${legName} has low option volume.`);
     if (leg.bid !== undefined && leg.ask !== undefined && leg.bid > 0 && leg.ask > leg.bid) {
       const mid = (leg.bid + leg.ask) / 2;
-      if ((leg.ask - leg.bid) / mid > 0.2) warnings.push(`${leg.optionSymbol} has a wide bid/ask spread.`);
+      if ((leg.ask - leg.bid) / mid > 0.2) warnings.push(`${legName} has a wide bid/ask spread.`);
     } else {
-      warnings.push(`${leg.optionSymbol} is missing a complete bid/ask quote; simulation uses last or mid pricing.`);
+      warnings.push(`${legName} is missing a complete bid/ask quote; simulation uses last or mid pricing.`);
     }
-    if (leg.side === "sell") warnings.push(`${leg.optionSymbol} has assignment risk because it is a short option leg.`);
+    if (leg.side === "sell") warnings.push(`${legName} has assignment risk because it is a short option leg.`);
   }
 
   return {
@@ -324,6 +345,12 @@ function isAllowedOptionsExpression(expressionType: TradeExpressionType): boolea
   ].includes(expressionType);
 }
 
+function getRequiredOptionsLevel(expressionType: TradeExpressionType): number {
+  if (expressionType === "covered_call" || expressionType === "cash_secured_put") return 1;
+  if (expressionType === "bull_call_debit_spread" || expressionType === "bear_put_debit_spread") return 3;
+  return 2;
+}
+
 function getTotalContracts(order: MultiLegPaperOrderRequest): number {
   return order.legs.reduce((sum, leg) => sum + leg.quantity, 0);
 }
@@ -333,6 +360,10 @@ function getLegDte(expiration: string, now: Date): number {
   const expirationTime = new Date(`${expiration}T21:00:00.000Z`).getTime();
   if (!Number.isFinite(expirationTime)) return 0;
   return Math.ceil((expirationTime - now.getTime()) / 86400000);
+}
+
+function formatOptionLegName(leg: MultiLegPaperOrderRequest["legs"][number]): string {
+  return `${leg.underlyingSymbol} ${leg.expiration} $${leg.strike} ${leg.optionType}`;
 }
 
 function hasDefinedRisk(order: MultiLegPaperOrderRequest): boolean {

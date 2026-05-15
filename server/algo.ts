@@ -40,7 +40,9 @@ export function buildAlgoTradeProposals(input: BuildAlgoProposalInput): AlgoTrad
     const referencePrice = input.referencePrice ?? input.analysisRun.snapshot.lastPrice;
     const order = buildPaperOrder(strategy, input, horizon);
     const expression = findTradeExpression(input.analysisRun, strategy.kind);
-    const multiLegOrder = expression?.multiLegOrder;
+    const multiLegOrder = expression?.multiLegOrder
+      ? { ...expression.multiLegOrder, paperExecutionMode: "broker_paper" as const }
+      : undefined;
     const validation = order
       ? validatePaperOrder(
           { ...order, earningsChecked: true, confirmedPaperOnly: true, acceptedRisk: true },
@@ -58,7 +60,7 @@ export function buildAlgoTradeProposals(input: BuildAlgoProposalInput): AlgoTrad
         ? validateMultiLegPaperOrder(
             {
               ...multiLegOrder,
-              timeHorizon: expression.timeHorizon,
+              timeHorizon: expression?.timeHorizon ?? holdingPeriod,
               earningsChecked: true,
               confirmedPaperOnly: true,
               acceptedRisk: true,
@@ -66,7 +68,7 @@ export function buildAlgoTradeProposals(input: BuildAlgoProposalInput): AlgoTrad
               paperSimulationAcknowledged: true,
               noLiveEndpointAcknowledged: true,
               sourceAnalysisId: input.analysisRun.id,
-              sourceExpressionId: expression.id,
+              sourceExpressionId: expression?.id,
               followedPlan: true
             },
             {
@@ -126,7 +128,7 @@ export function buildAlgoTradeProposals(input: BuildAlgoProposalInput): AlgoTrad
       breakeven: expression?.breakeven,
       dte: expression?.dte,
       liquidityScore: expression?.liquidityScore,
-      paperExecutionMode: expression?.paperExecutionMode,
+      paperExecutionMode: multiLegOrder?.paperExecutionMode ?? expression?.paperExecutionMode,
       selectedContracts: multiLegOrder?.legs,
       order,
       multiLegOrder,
@@ -221,7 +223,7 @@ function getExecutionType(
 ): AlgoTradeProposal["executionType"] {
   if (strategy.kind === "long_stock" && order) return "long_stock_bracket";
   if (strategy.kind === "short_stock" && order) return "short_stock_bracket";
-  if (multiLegOrder) return "internal_options_simulation";
+  if (multiLegOrder) return "broker_options_order";
   return "research_only";
 }
 
@@ -268,9 +270,10 @@ function buildWarnings(
 ): string[] {
   const warnings = [...strategy.warnings];
   if (hardBlocked) warnings.push("Hard safety blockers prevent executable order placement.");
-  if (!["long_stock", "short_stock"].includes(strategy.kind) && !expression?.multiLegOrder) warnings.push("Needs exact contract selection before paper simulation.");
+  if (!["long_stock", "short_stock"].includes(strategy.kind) && !expression?.multiLegOrder) warnings.push("Needs exact contract selection before paper options validation.");
   if (strategy.kind === "short_stock") warnings.push("Short-selling requires margin/borrow availability and can lose more than the initial plan if price gaps.");
-  if (expression?.paperExecutionMode === "internal_simulation") warnings.push("Options are internally simulated paper trades, not broker options submissions.");
+  if (expression?.multiLegOrder) warnings.push("Validated options proposals use Alpaca broker-paper orders after manual confirmation; paper fills may differ from live fills.");
+  else if (expression?.paperExecutionMode === "internal_simulation") warnings.push("Options require exact contracts before broker-paper validation.");
   if (expression?.statusReasons.length) warnings.push(...expression.statusReasons);
   if (expression?.optionSelectionDiagnostics?.rejectionReasons.length) warnings.push(...expression.optionSelectionDiagnostics.rejectionReasons);
   if (validation && !validation.ok) warnings.push(...validation.errors);
@@ -344,7 +347,7 @@ function getHowToFix(
   blockedReasons: string[],
   expression: TradeExpression | undefined
 ): string[] {
-  if (workflowStatus === "paper_eligible") return ["Review warnings, confirm paper-only execution, then approve from the Algo card."];
+  if (workflowStatus === "paper_eligible") return ["Review warnings, confirm paper-only execution, then approve the broker-paper order from the Algo card."];
   if (workflowStatus === "needs_contract_selection") {
     const diagnostics = expression?.optionSelectionDiagnostics;
     return diagnostics?.rejectionReasons.length

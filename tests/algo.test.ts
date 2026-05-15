@@ -96,7 +96,7 @@ describe("algo trade proposals", () => {
     expect(optionProposal?.howToFix?.join(" ")).toMatch(/No option contracts|Select exact option/i);
   });
 
-  it("promotes a valid long call contract to internal paper simulation eligibility", () => {
+  it("promotes a valid long call contract to broker-paper option eligibility", () => {
     const settings = getDefaultRiskSettings();
     const analysisRun = buildAnalysisRun({
       mode: "fast",
@@ -120,10 +120,10 @@ describe("algo trade proposals", () => {
 
     const call = proposals.find((proposal) => proposal.strategyKind === "long_call");
     expect(call?.workflowStatus).toBe("paper_eligible");
-    expect(call?.executionType).toBe("internal_options_simulation");
+    expect(call?.executionType).toBe("broker_options_order");
     expect(call?.multiLegOrder?.legs[0].optionSymbol).toBe("AAPL260619C00145000");
     expect(call?.selectedContracts?.[0].side).toBe("buy");
-    expect(call?.paperExecutionMode).toBe("internal_simulation");
+    expect(call?.paperExecutionMode).toBe("broker_paper");
   });
 
   it("calculates valid debit spread metrics inside algo proposals", () => {

@@ -217,8 +217,8 @@ export function buildStrategyCandidates(input: BuildAnalysisInput, blockers = bu
       score: clampScore(snapshot.score + (bestCall ? 5 : -18)),
       summary: bestCall ? "Bullish defined-risk options exposure using a call contract." : "No liquid call candidate was available from the loaded contracts.",
       setup: [
-        bestCall ? `Representative call: ${bestCall.symbol}.` : "No representative call.",
-        bestCall ? `Strike ${bestCall.strikePrice}, exp ${bestCall.expirationDate}.` : "Load option contracts for better comparison.",
+        bestCall ? `Representative call: ${formatOptionContractName(bestCall)}.` : "No representative call.",
+        bestCall ? `Broker symbol ${bestCall.symbol}.` : "Load option contracts for better comparison.",
         snapshot.rsi14 !== null ? `RSI: ${snapshot.rsi14}.` : "RSI unavailable."
       ],
       riskNotes: [
@@ -226,7 +226,7 @@ export function buildStrategyCandidates(input: BuildAnalysisInput, blockers = bu
         "Time decay can hurt even if the stock direction is right.",
         bestCall?.impliedVolatility ? `Estimated IV: ${formatPercent(bestCall.impliedVolatility)}.` : "Estimated IV unavailable."
       ],
-      representativeContract: bestCall?.symbol,
+      representativeContract: bestCall ? formatOptionContractName(bestCall) : undefined,
       estimatedMaxLoss: bestCall?.maxLoss ?? null,
       breakeven: bestCall?.breakeven ?? null,
       probabilityOfProfit: bestCall?.probabilityOfProfit ?? null,
@@ -240,8 +240,8 @@ export function buildStrategyCandidates(input: BuildAnalysisInput, blockers = bu
       score: clampScore(100 - snapshot.score + (bestPut && bearish ? 18 : bestPut ? 2 : -18)),
       summary: bestPut ? "Bearish defined-risk options exposure using a put contract." : "No liquid put candidate was available from the loaded contracts.",
       setup: [
-        bestPut ? `Representative put: ${bestPut.symbol}.` : "No representative put.",
-        bestPut ? `Strike ${bestPut.strikePrice}, exp ${bestPut.expirationDate}.` : "Load option contracts for better comparison.",
+        bestPut ? `Representative put: ${formatOptionContractName(bestPut)}.` : "No representative put.",
+        bestPut ? `Broker symbol ${bestPut.symbol}.` : "Load option contracts for better comparison.",
         `Bias: ${snapshot.bias}.`
       ],
       riskNotes: [
@@ -249,7 +249,7 @@ export function buildStrategyCandidates(input: BuildAnalysisInput, blockers = bu
         "Needs enough downside move before expiration to offset premium decay.",
         bestPut?.impliedVolatility ? `Estimated IV: ${formatPercent(bestPut.impliedVolatility)}.` : "Estimated IV unavailable."
       ],
-      representativeContract: bestPut?.symbol,
+      representativeContract: bestPut ? formatOptionContractName(bestPut) : undefined,
       estimatedMaxLoss: bestPut?.maxLoss ?? null,
       breakeven: bestPut?.breakeven ?? null,
       probabilityOfProfit: bestPut?.probabilityOfProfit ?? null,
@@ -267,7 +267,7 @@ export function buildStrategyCandidates(input: BuildAnalysisInput, blockers = bu
         "Defined risk, defined reward.",
         callSpread.netDebit !== null ? `Estimated debit: ${callSpread.netDebit}.` : "Spread debit unavailable."
       ],
-      representativeContract: liquidCalls[0]?.symbol,
+      representativeContract: liquidCalls[0] ? formatOptionContractName(liquidCalls[0]) : undefined,
       legs: getSpreadLegs(liquidCalls),
       netDebit: callSpread.netDebit,
       breakeven: callSpread.breakeven,
@@ -288,7 +288,7 @@ export function buildStrategyCandidates(input: BuildAnalysisInput, blockers = bu
         "Defined risk, defined reward.",
         putSpread.netDebit !== null ? `Estimated debit: ${putSpread.netDebit}.` : "Spread debit unavailable."
       ],
-      representativeContract: liquidPuts[0]?.symbol,
+      representativeContract: liquidPuts[0] ? formatOptionContractName(liquidPuts[0]) : undefined,
       legs: getSpreadLegs(liquidPuts),
       netDebit: putSpread.netDebit,
       breakeven: putSpread.breakeven,
@@ -306,14 +306,14 @@ export function buildStrategyCandidates(input: BuildAnalysisInput, blockers = bu
       summary: hasPosition ? "Income idea for an existing share position." : "Requires owning shares first; useful mainly for income or exit planning.",
       setup: [
         hasPosition ? "Existing position detected." : "No existing paper position detected.",
-        liquidCalls[0] ? `Reference call: ${liquidCalls[0].symbol}.` : "No liquid call candidate.",
+        liquidCalls[0] ? `Reference call: ${formatOptionContractName(liquidCalls[0])}.` : "No liquid call candidate.",
         rangeBound ? "Range-bound conditions may fit income research." : "Strong directional trends can make call-away risk more important."
       ],
       riskNotes: [
         "Caps upside above the short call strike.",
         "Shares still carry downside risk."
       ],
-      representativeContract: liquidCalls[0]?.symbol,
+      representativeContract: liquidCalls[0] ? formatOptionContractName(liquidCalls[0]) : undefined,
       netCredit: coveredCall.netCredit,
       breakeven: coveredCall.breakeven,
       estimatedMaxLoss: coveredCall.maxLoss,
@@ -329,7 +329,7 @@ export function buildStrategyCandidates(input: BuildAnalysisInput, blockers = bu
       score: clampScore((bullish || rangeBound ? 58 : 35) + (bestPut ? 8 : -12)),
       summary: "Income or entry strategy if you are willing to buy shares at the strike.",
       setup: [
-        bestPut ? `Reference put: ${bestPut.symbol}.` : "No representative put.",
+        bestPut ? `Reference put: ${formatOptionContractName(bestPut)}.` : "No representative put.",
         bestPut ? `Potential assignment near ${bestPut.strikePrice}.` : "Load put contracts for assignment levels.",
         `Current trend: ${snapshot.trend}.`
       ],
@@ -337,7 +337,7 @@ export function buildStrategyCandidates(input: BuildAnalysisInput, blockers = bu
         "Requires cash to buy 100 shares per contract if assigned.",
         "Downside can resemble owning shares from the strike less premium."
       ],
-      representativeContract: bestPut?.symbol,
+      representativeContract: bestPut ? formatOptionContractName(bestPut) : undefined,
       netCredit: cashSecuredPut.netCredit,
       breakeven: cashSecuredPut.breakeven,
       estimatedMaxLoss: cashSecuredPut.maxLoss,
@@ -572,11 +572,9 @@ function getPositionSymbol(position: unknown): string | null {
 
 function getLiquidOptions(options: OptionIdea[], type: "call" | "put"): OptionIdea[] {
   return options
-    .filter((option) => option.type === type && !option.liquidityWarning && (option.openInterest ?? 0) >= 100)
+    .filter((option) => option.type === type && !option.liquidityWarning && (option.openInterest ?? 0) >= 100 && (option.daysToExpiration === undefined || option.daysToExpiration === null || option.daysToExpiration > 0))
     .sort((left, right) => {
-      const leftExpiry = new Date(left.expirationDate).getTime();
-      const rightExpiry = new Date(right.expirationDate).getTime();
-      return leftExpiry - rightExpiry || left.strikePrice - right.strikePrice;
+      return getDtePreferenceScore(left) - getDtePreferenceScore(right) || left.strikePrice - right.strikePrice;
     });
 }
 
@@ -584,7 +582,10 @@ function pickOptionNearPrice(options: OptionIdea[], price: number | null, side: 
   if (!options.length) return undefined;
   if (!price) return options[0];
   const filtered = options.filter((option) => side === "above" ? option.strikePrice >= price : option.strikePrice <= price);
-  return (filtered.length ? filtered : options).sort((left, right) => Math.abs(left.strikePrice - price) - Math.abs(right.strikePrice - price))[0];
+  return (filtered.length ? filtered : options).sort((left, right) => (
+    Math.abs(left.strikePrice - price) - Math.abs(right.strikePrice - price)
+    || getDtePreferenceScore(left) - getDtePreferenceScore(right)
+  ))[0];
 }
 
 function getSpreadSetup(options: OptionIdea[], type: "call" | "put"): string[] {
@@ -592,14 +593,34 @@ function getSpreadSetup(options: OptionIdea[], type: "call" | "put"): string[] {
   const first = options[0];
   const second = options[1];
   return [
-    `Reference long leg: ${first.symbol}.`,
-    `Reference short leg: ${second.symbol}.`,
+    `Reference long leg: ${formatOptionContractName(first)}.`,
+    `Reference short leg: ${formatOptionContractName(second)}.`,
     `Strikes: ${first.strikePrice} / ${second.strikePrice}.`
   ];
 }
 
 function getSpreadLegs(options: OptionIdea[]): string[] {
-  return options.slice(0, 2).map((option, index) => `${index === 0 ? "Long" : "Short"} ${option.symbol}`);
+  return options.slice(0, 2).map((option, index) => `${index === 0 ? "Long" : "Short"} ${formatOptionContractName(option)}`);
+}
+
+function getDtePreferenceScore(option: OptionIdea): number {
+  const dte = option.daysToExpiration ?? 45;
+  const shortDtePenalty = dte > 0 && dte < 7 ? 10 : 0;
+  return Math.abs(dte - 45) + shortDtePenalty;
+}
+
+function formatOptionContractName(option: OptionIdea): string {
+  return `${option.underlyingSymbol} ${formatOptionExpiration(option.expirationDate)} $${option.strikePrice} ${option.type === "call" ? "Call" : "Put"}`;
+}
+
+function formatOptionExpiration(expiration: string): string {
+  const date = new Date(`${expiration}T00:00:00`);
+  if (!Number.isFinite(date.getTime())) return expiration;
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  });
 }
 
 function formatPercent(value: number): string {

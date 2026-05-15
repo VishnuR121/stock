@@ -75,7 +75,7 @@ export function buildTradeExpressionResult(input: TradeExpressionEngineInput): T
       hardBlocked,
       eventWarnings,
       confidence: snapshot.score,
-      timeHorizon: "30-60 DTE swing options",
+      timeHorizon: "Flexible DTE swing options (prefers 14-60)",
       directionalFit: isBullish(snapshot)
     }),
     buildLongOption("long_put", "put", {
@@ -89,7 +89,7 @@ export function buildTradeExpressionResult(input: TradeExpressionEngineInput): T
       hardBlocked,
       eventWarnings,
       confidence: 100 - snapshot.score,
-      timeHorizon: "30-60 DTE swing options",
+      timeHorizon: "Flexible DTE swing options (prefers 14-60)",
       directionalFit: isBearish(snapshot)
     }),
     buildDebitSpread("bull_call_debit_spread", "call", {
@@ -103,7 +103,7 @@ export function buildTradeExpressionResult(input: TradeExpressionEngineInput): T
       hardBlocked,
       eventWarnings,
       confidence: snapshot.score,
-      timeHorizon: "30-60 DTE defined-risk spread",
+      timeHorizon: "Flexible DTE defined-risk spread (prefers 14-60)",
       directionalFit: isBullish(snapshot)
     }),
     buildDebitSpread("bear_put_debit_spread", "put", {
@@ -117,7 +117,7 @@ export function buildTradeExpressionResult(input: TradeExpressionEngineInput): T
       hardBlocked,
       eventWarnings,
       confidence: 100 - snapshot.score,
-      timeHorizon: "30-60 DTE defined-risk spread",
+      timeHorizon: "Flexible DTE defined-risk spread (prefers 14-60)",
       directionalFit: isBearish(snapshot)
     }),
     buildCoveredCall({
@@ -130,7 +130,7 @@ export function buildTradeExpressionResult(input: TradeExpressionEngineInput): T
       hardBlocked,
       eventWarnings,
       confidence: getIncomeConfidence(snapshot),
-      timeHorizon: "30-60 DTE income overlay"
+      timeHorizon: "Flexible DTE income overlay (prefers 14-60)"
     }),
     buildCashSecuredPut({
       symbol,
@@ -143,7 +143,7 @@ export function buildTradeExpressionResult(input: TradeExpressionEngineInput): T
       hardBlocked,
       eventWarnings,
       confidence: getIncomeConfidence(snapshot),
-      timeHorizon: "30-60 DTE income entry",
+      timeHorizon: "Flexible DTE income entry (prefers 14-60)",
       directionalFit: isBullish(snapshot) || snapshot.bias === "neutral" || snapshot.trend === "range"
     }),
     researchOnlyExpression({
@@ -200,7 +200,7 @@ export function buildTradeExpressionResult(input: TradeExpressionEngineInput): T
       optionsPaperMode: OPTIONS_PAPER_MODE,
       notes: [
         "Equity brackets use Alpaca paper only after manual confirmation.",
-        "Options paper trades are internally simulated unless broker-paper support is explicitly added and validated.",
+        "Algo options proposals can use broker-paper submission after exact contract selection and deterministic validation; advanced Trade Expression drafts remain internal simulations.",
         "No live trading, naked options, 0DTE by default, or AI auto-execution is enabled."
       ]
     }
@@ -356,7 +356,7 @@ function buildLongOption(
   optionType: "call" | "put",
   input: OptionExpressionInput
 ): TradeExpression {
-  const selection = selectSingleOption(input.options, optionType, input.currentPrice);
+  const selection = selectSingleOption(input.options, optionType, input.currentPrice, undefined, input.riskSettings);
   const option = selection.option;
   const price = getOptionPrice(option);
   const dte = option?.daysToExpiration ?? (option ? getDaysToExpiration(option.expirationDate, new Date()) : null);
@@ -409,7 +409,7 @@ function buildDebitSpread(
   optionType: "call" | "put",
   input: OptionExpressionInput
 ): TradeExpression {
-  const spread = selectDebitSpread(input.options, optionType, input.currentPrice);
+  const spread = selectDebitSpread(input.options, optionType, input.currentPrice, input.riskSettings);
   const metrics = getDebitSpreadMetrics({ type: optionType, longLeg: spread?.longLeg, shortLeg: spread?.shortLeg });
   const dte = spread?.longLeg?.daysToExpiration ?? null;
   const requiredCapital = metrics.maxLoss;
@@ -461,7 +461,7 @@ function buildDebitSpread(
     liquidityScore: averageScore(spread?.longLeg?.liquidityScore, spread?.shortLeg?.liquidityScore),
     paperExecutionMode: OPTIONS_PAPER_MODE,
     multiLegOrder: order,
-    optionSelectionDiagnostics: spread?.diagnostics ?? getSingleOptionDiagnostics(input.options, optionType, input.currentPrice, optionType === "call" ? "above" : "below"),
+    optionSelectionDiagnostics: spread?.diagnostics ?? getSingleOptionDiagnostics(input.options, optionType, input.currentPrice, optionType === "call" ? "above" : "below", input.riskSettings),
     timeHorizon: input.timeHorizon
   });
 }
@@ -478,7 +478,7 @@ function buildCoveredCall(input: {
   confidence: number;
   timeHorizon: string;
 }): TradeExpression {
-  const selection = selectSingleOption(input.options, "call", input.currentPrice, "above");
+  const selection = selectSingleOption(input.options, "call", input.currentPrice, "above", input.riskSettings);
   const call = selection.option;
   const metrics = getCoveredCallMetrics(input.currentPrice, call);
   const dte = call?.daysToExpiration ?? null;
@@ -562,7 +562,7 @@ function buildCashSecuredPut(input: {
   timeHorizon: string;
   directionalFit: boolean;
 }): TradeExpression {
-  const selection = selectSingleOption(input.options, "put", input.currentPrice, "below");
+  const selection = selectSingleOption(input.options, "put", input.currentPrice, "below", input.riskSettings);
   const put = selection.option;
   const metrics = getCashSecuredPutMetrics(put);
   const dte = put?.daysToExpiration ?? null;
@@ -659,7 +659,7 @@ function getOptionEligibilityErrors(input: {
 }): string[] {
   const errors: string[] = [];
   if (input.input.hardBlocked) errors.push("Global paper-trading blockers must be resolved first.");
-  if (!input.option) errors.push("No contract matching the default DTE, strike, and liquidity filters was found.");
+  if (!input.option) errors.push("No contract matching the strike, price, and liquidity filters was found.");
   if (input.price === null || input.price <= 0) errors.push("A valid option price is required.");
   if (input.option?.openInterest === null || input.option?.openInterest === undefined) errors.push("Open interest is required for liquidity screening.");
   if ((input.dte ?? 0) <= 0 && input.input.riskSettings.allowZeroDte !== true) errors.push("0DTE options are blocked by default.");
@@ -674,10 +674,12 @@ function selectSingleOption(
   options: OptionIdea[],
   type: "call" | "put",
   price: number | null,
-  moneyness: "above" | "below" = type === "call" ? "above" : "below"
+  moneyness: "above" | "below" = type === "call" ? "above" : "below",
+  riskSettings?: RiskSettings
 ): { option?: OptionIdea; diagnostics: OptionSelectionDiagnostics } {
-  const eligible = getSingleOptionEligibleSets(options, type);
-  const dtePreferred = eligible.openInterestEligible.filter((option) => (option.daysToExpiration ?? 0) >= 30 && (option.daysToExpiration ?? 0) <= 60);
+  const dteWindow = getOptionsDteWindow(riskSettings);
+  const eligible = getSingleOptionEligibleSets(options, type, dteWindow);
+  const dtePreferred = eligible.openInterestEligible.filter((option) => (option.daysToExpiration ?? 0) >= dteWindow.preferredMin && (option.daysToExpiration ?? 0) <= dteWindow.preferredMax);
   const candidates = dtePreferred.length ? dtePreferred : eligible.openInterestEligible;
   const option = candidates.length
     ? [...candidates].sort((left, right) => {
@@ -700,7 +702,8 @@ function selectSingleOption(
       moneyness,
       eligible,
       candidatesConsidered: candidates.length,
-      selected: option
+      selected: option,
+      dteWindow
     })
   };
 }
@@ -709,19 +712,20 @@ function getSingleOptionDiagnostics(
   options: OptionIdea[],
   type: "call" | "put",
   price: number | null,
-  moneyness: "above" | "below" = type === "call" ? "above" : "below"
+  moneyness: "above" | "below" = type === "call" ? "above" : "below",
+  riskSettings?: RiskSettings
 ): OptionSelectionDiagnostics {
-  return selectSingleOption(options, type, price, moneyness).diagnostics;
+  return selectSingleOption(options, type, price, moneyness, riskSettings).diagnostics;
 }
 
-function getSingleOptionEligibleSets(options: OptionIdea[], type: "call" | "put") {
+function getSingleOptionEligibleSets(options: OptionIdea[], type: "call" | "put", dteWindow: OptionsDteWindow) {
   const typeMatches = options.filter((option) => option.type === type);
   const dteEligible = typeMatches
     .filter((option) => option.type === type)
-    .filter((option) => (option.daysToExpiration ?? 0) >= 21 && (option.daysToExpiration ?? 0) <= 90);
+    .filter((option) => (option.daysToExpiration ?? 0) >= dteWindow.min && (option.daysToExpiration ?? 0) <= dteWindow.max);
   const priceEligible = dteEligible.filter((option) => getOptionPrice(option) !== null);
   const openInterestEligible = priceEligible.filter((option) => option.openInterest !== null && option.openInterest !== undefined);
-  const preferredDteEligible = openInterestEligible.filter((option) => (option.daysToExpiration ?? 0) >= 30 && (option.daysToExpiration ?? 0) <= 60);
+  const preferredDteEligible = openInterestEligible.filter((option) => (option.daysToExpiration ?? 0) >= dteWindow.preferredMin && (option.daysToExpiration ?? 0) <= dteWindow.preferredMax);
 
   return {
     typeMatches,
@@ -739,14 +743,18 @@ function buildSingleOptionDiagnostics(input: {
   eligible: ReturnType<typeof getSingleOptionEligibleSets>;
   candidatesConsidered: number;
   selected?: OptionIdea;
+  dteWindow: OptionsDteWindow;
 }): OptionSelectionDiagnostics {
   const rejectionReasons: string[] = [];
   if (!input.options.length) rejectionReasons.push("No option contracts were loaded for this underlying.");
   if (!input.eligible.typeMatches.length) rejectionReasons.push(`No ${input.type} contracts were loaded.`);
-  if (input.eligible.typeMatches.length && !input.eligible.dteEligible.length) rejectionReasons.push("No contracts were inside the 21-90 DTE selection window.");
+  const dteWindow = input.dteWindow;
+  if (input.eligible.typeMatches.length && !input.eligible.dteEligible.length) rejectionReasons.push(`No contracts were inside the broad ${dteWindow.min}-${dteWindow.max} DTE fallback window.`);
   if (input.eligible.dteEligible.length && !input.eligible.priceEligible.length) rejectionReasons.push("No DTE-eligible contracts had valid mid, last, or close pricing.");
   if (input.eligible.priceEligible.length && !input.eligible.openInterestEligible.length) rejectionReasons.push("No priced contracts had open-interest data for liquidity screening.");
-  if (input.eligible.openInterestEligible.length && !input.eligible.preferredDteEligible.length) rejectionReasons.push("No priced/liquid contracts were in the preferred 30-60 DTE window; using the broader 21-90 DTE pool.");
+  if (input.eligible.openInterestEligible.length && !input.eligible.preferredDteEligible.length) {
+    rejectionReasons.push(`No priced/liquid contracts were in the preferred ${dteWindow.preferredMin}-${dteWindow.preferredMax} DTE window; using the broader ${dteWindow.min}-${dteWindow.max} DTE pool.`);
+  }
 
   return {
     optionType: input.type,
@@ -757,6 +765,7 @@ function buildSingleOptionDiagnostics(input: {
     priceEligible: input.eligible.priceEligible.length,
     openInterestEligible: input.eligible.openInterestEligible.length,
     preferredDteEligible: input.eligible.preferredDteEligible.length,
+    dteWindow,
     candidatesConsidered: input.candidatesConsidered,
     selectedSymbol: input.selected?.symbol,
     selectedExpiration: input.selected?.expirationDate,
@@ -765,12 +774,33 @@ function buildSingleOptionDiagnostics(input: {
   };
 }
 
+type OptionsDteWindow = {
+  min: number;
+  max: number;
+  preferredMin: number;
+  preferredMax: number;
+};
+
+function getOptionsDteWindow(riskSettings?: RiskSettings): OptionsDteWindow {
+  const min = riskSettings?.allowZeroDte === true ? 0 : 1;
+  const max = Math.max(365, Math.round(riskSettings?.maxOptionsDte ?? 365));
+  const preferredMin = Math.max(min, Math.round(riskSettings?.preferredOptionsDteMin ?? 14));
+  const preferredMax = Math.min(max, Math.max(preferredMin + 1, Math.round(riskSettings?.preferredOptionsDteMax ?? 60)));
+  return {
+    min,
+    max,
+    preferredMin,
+    preferredMax
+  };
+}
+
 function selectDebitSpread(
   options: OptionIdea[],
   type: "call" | "put",
-  price: number | null
+  price: number | null,
+  riskSettings?: RiskSettings
 ): { longLeg?: OptionIdea; shortLeg?: OptionIdea; diagnostics: OptionSelectionDiagnostics } {
-  const longSelection = selectSingleOption(options, type, price, type === "call" ? "above" : "below");
+  const longSelection = selectSingleOption(options, type, price, type === "call" ? "above" : "below", riskSettings);
   const longLeg = longSelection.option;
   if (!longLeg) return { diagnostics: longSelection.diagnostics };
   const sameExpiry = options
