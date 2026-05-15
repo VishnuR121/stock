@@ -67,26 +67,13 @@ describe("algo trade proposals", () => {
     expect(short?.order?.takeProfitPrice).toBeLessThan(100);
   });
 
-  it("keeps long option proposals analysis-only even when max loss fits risk", () => {
+  it("classifies option proposals with no selected contract as needs contract selection", () => {
     const settings = getDefaultRiskSettings();
     const analysisRun = buildAnalysisRun({
       mode: "fast",
       snapshot: makeSnapshot(),
       context: makeContext(),
-      options: [
-        {
-          symbol: "AAPL260619C00145000",
-          underlyingSymbol: "AAPL",
-          type: "call",
-          expirationDate: "2026-06-19",
-          strikePrice: 145,
-          closePrice: 4.5,
-          openInterest: 250,
-          breakeven: 149.5,
-          maxLoss: 450,
-          liquidityWarning: null
-        }
-      ],
+      options: [],
       account: { equity: 100000 },
       positions: [],
       journal: [],
@@ -101,12 +88,72 @@ describe("algo trade proposals", () => {
       referencePrice: 140
     });
 
+    const optionProposal = proposals.find((proposal) => ["long_call", "long_put", "call_debit_spread", "put_debit_spread", "covered_call", "cash_secured_put"].includes(proposal.strategyKind));
+    expect(optionProposal?.executable).toBe(false);
+    expect(optionProposal?.workflowStatus).toBe("needs_contract_selection");
+    expect(optionProposal?.horizon).toBe("options_short_term");
+    expect(optionProposal?.multiLegOrder).toBeUndefined();
+    expect(optionProposal?.howToFix?.join(" ")).toMatch(/No option contracts|Select exact option/i);
+  });
+
+  it("promotes a valid long call contract to internal paper simulation eligibility", () => {
+    const settings = getDefaultRiskSettings();
+    const analysisRun = buildAnalysisRun({
+      mode: "fast",
+      snapshot: makeSnapshot(),
+      context: makeContext(),
+      options: makeOptions(),
+      account: { equity: 100000, buyingPower: 100000, cash: 100000, paper: true },
+      positions: [],
+      journal: [],
+      riskSettings: settings,
+      marketSnapshots: []
+    });
+
+    const proposals = buildAlgoTradeProposals({
+      analysisRun,
+      account: { equity: 100000, buyingPower: 100000, cash: 100000, paper: true },
+      riskSettings: settings,
+      referencePrice: 140,
+      now: new Date("2026-05-14T15:00:00.000Z")
+    });
+
     const call = proposals.find((proposal) => proposal.strategyKind === "long_call");
-    expect(call?.executable).toBe(false);
-    expect(call?.executionType).toBe("research_only");
-    expect(call?.horizon).toBe("options_short_term");
-    expect(call?.optionOrder).toBeUndefined();
-    expect(call?.warnings.join(" ")).toMatch(/Options are analysis-only/);
+    expect(call?.workflowStatus).toBe("paper_eligible");
+    expect(call?.executionType).toBe("internal_options_simulation");
+    expect(call?.multiLegOrder?.legs[0].optionSymbol).toBe("AAPL260619C00145000");
+    expect(call?.selectedContracts?.[0].side).toBe("buy");
+    expect(call?.paperExecutionMode).toBe("internal_simulation");
+  });
+
+  it("calculates valid debit spread metrics inside algo proposals", () => {
+    const settings = getDefaultRiskSettings();
+    const analysisRun = buildAnalysisRun({
+      mode: "fast",
+      snapshot: makeSnapshot(),
+      context: makeContext(),
+      options: makeOptions(),
+      account: { equity: 100000, buyingPower: 100000, cash: 100000, paper: true },
+      positions: [],
+      journal: [],
+      riskSettings: settings,
+      marketSnapshots: []
+    });
+
+    const proposals = buildAlgoTradeProposals({
+      analysisRun,
+      account: { equity: 100000, buyingPower: 100000, cash: 100000, paper: true },
+      riskSettings: settings,
+      referencePrice: 140,
+      now: new Date("2026-05-14T15:00:00.000Z")
+    });
+
+    const spread = proposals.find((proposal) => proposal.strategyKind === "call_debit_spread");
+    expect(spread?.workflowStatus).toBe("paper_eligible");
+    expect(spread?.maxLoss).toBe(220);
+    expect(spread?.maxProfit).toBe(280);
+    expect(spread?.breakeven).toBe(147.2);
+    expect(spread?.selectedContracts).toHaveLength(2);
   });
 });
 
@@ -197,4 +244,39 @@ function makeContext(): TradeContext {
     recentFilings: [],
     contextWarnings: []
   };
+}
+
+function makeOptions() {
+  return [
+    {
+      symbol: "AAPL260619C00145000",
+      underlyingSymbol: "AAPL",
+      type: "call" as const,
+      expirationDate: "2026-06-19",
+      strikePrice: 145,
+      closePrice: 4.5,
+      bidPrice: 4.4,
+      askPrice: 4.6,
+      openInterest: 250,
+      volume: 100,
+      breakeven: 149.5,
+      maxLoss: 450,
+      liquidityWarning: null
+    },
+    {
+      symbol: "AAPL260619C00150000",
+      underlyingSymbol: "AAPL",
+      type: "call" as const,
+      expirationDate: "2026-06-19",
+      strikePrice: 150,
+      closePrice: 2.3,
+      bidPrice: 2.2,
+      askPrice: 2.4,
+      openInterest: 240,
+      volume: 90,
+      breakeven: 152.3,
+      maxLoss: 230,
+      liquidityWarning: null
+    }
+  ];
 }

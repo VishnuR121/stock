@@ -30,6 +30,7 @@ import type {
   JournalStatus,
   MarketRegimeLabel,
   MultiLegPaperOrderRequest,
+  MultiLegPaperOrderValidationResult,
   PaperOrderRequest,
   PaperExecutionMode,
   PaperOrderValidationResult,
@@ -398,6 +399,7 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
   app.post("/api/algo/proposals/:id/reject", asyncHandler(async (request, response) => {
     const proposal = await store.updateAlgoTradeProposal(request.params.id, {
       status: "rejected",
+      workflowStatus: "research_only",
       reviewedAt: new Date().toISOString(),
       rejectionReason: optionalString(request.body?.reason) ?? "Rejected after review."
     });
@@ -431,7 +433,7 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
     const account = await alpaca.getAccount();
     const riskProfile = getRiskProfile(account.equity ?? 100000, riskSettings);
     let brokerOrder: unknown;
-    let validation: (PaperOrderValidationResult & { order?: PaperOrderRequest }) | undefined = proposal.validation;
+    let validation: (PaperOrderValidationResult & { order?: PaperOrderRequest }) | MultiLegPaperOrderValidationResult | undefined = proposal.validation;
     let journalAction: TradeAction = "watch";
     let entryPrice: number | undefined;
 
@@ -463,6 +465,91 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       brokerOrder = await alpaca.placePaperBracketOrder(validation.order);
       journalAction = order.side === "sell" ? "paper_short_candidate" : "paper_long_candidate";
       entryPrice = referencePrice ?? undefined;
+    } else if (proposal.executionType === "internal_options_simulation" && proposal.multiLegOrder) {
+      const order: MultiLegPaperOrderRequest = {
+        ...proposal.multiLegOrder,
+        timeHorizon: proposal.horizon === "options_short_term" ? "30-60 DTE options proposal" : proposal.expectedHoldingPeriod,
+        earningsChecked: true,
+        confirmedPaperOnly: true,
+        acceptedRisk: true,
+        maxLossAcknowledged: true,
+        paperSimulationAcknowledged: true,
+        noLiveEndpointAcknowledged: true,
+        sourceAnalysisId: proposal.sourceAnalysisId,
+        followedPlan: true
+      };
+      const [positionsResponse, journal] = await Promise.all([safePositions(alpaca), store.getJournal()]);
+      if (order.expressionType === "covered_call" && getHeldLongShares(positionsResponse.positions, order.underlyingSymbol) < 100) {
+        const updated = await store.updateAlgoTradeProposal(proposal.id, {
+          status: "blocked",
+          workflowStatus: "blocked",
+          blockedReasons: ["Covered calls require at least 100 long shares of the underlying."],
+          warnings: [...new Set([...proposal.warnings, "Covered calls require at least 100 long shares of the underlying."])]
+        });
+        response.status(400).json({ proposal: updated });
+        return;
+      }
+      const optionValidation = validateMultiLegPaperOrder(order, riskProfile, riskSettings, {
+        buyingPower: account.buyingPower ?? account.cash ?? account.equity,
+        alpacaPaperOnly: isPaperAlpacaUrl(config.alpacaPaperBaseUrl),
+        ...getOpenPaperOptionsExposure(journal, order.underlyingSymbol)
+      });
+      if (!optionValidation.ok || !optionValidation.order) {
+        const updated = await store.updateAlgoTradeProposal(proposal.id, {
+          status: "blocked",
+          workflowStatus: "blocked",
+          validation: optionValidation,
+          blockedReasons: optionValidation.errors,
+          warnings: [...new Set([...proposal.warnings, ...optionValidation.errors])]
+        });
+        response.status(400).json({ proposal: updated, validation: optionValidation });
+        return;
+      }
+      const simulatedOrder = {
+        id: `sim-options-${optionValidation.order.underlyingSymbol}-${Date.now()}`,
+        status: "internally_simulated_paper",
+        paperExecutionMode: optionValidation.order.paperExecutionMode,
+        expressionType: optionValidation.order.expressionType,
+        legs: optionValidation.order.legs
+      };
+      await store.addJournalEntry({
+        symbol: optionValidation.order.underlyingSymbol,
+        planId: proposal.id,
+        signalAsOf: proposal.signalAsOf,
+        sourceType: "algo_proposal",
+        sourceId: proposal.sourceAnalysisId,
+        followedPlan: true,
+        status: "paper_open",
+        action: "paper_options_candidate",
+        notes: getMultiLegPaperOrderJournalNotes(optionValidation.order),
+        outcome: "open",
+        expressionType: optionValidation.order.expressionType,
+        underlyingSymbol: optionValidation.order.underlyingSymbol,
+        assetClass: optionValidation.order.legs.length > 1 ? "multi_leg_option" : "option",
+        optionLegs: optionValidation.order.legs,
+        maxLoss: optionValidation.order.maxLoss,
+        maxProfit: optionValidation.order.maxProfit,
+        breakeven: optionValidation.order.breakeven,
+        requiredCapital: optionValidation.order.requiredCapital,
+        paperExecutionMode: optionValidation.order.paperExecutionMode,
+        brokerOrderIds: [],
+        optionsMetadata: {
+          estimatedDebit: optionValidation.order.estimatedDebit,
+          estimatedCredit: optionValidation.order.estimatedCredit,
+          simulatedOrderId: simulatedOrder.id
+        },
+        strategyWarnings: optionValidation.warnings,
+        strategyCategory: optionValidation.order.expressionType
+      });
+      const updated = await store.updateAlgoTradeProposal(proposal.id, {
+        status: "placed",
+        workflowStatus: "internally_simulated",
+        validation: optionValidation,
+        brokerOrder: simulatedOrder,
+        reviewedAt: new Date().toISOString()
+      });
+      response.json({ proposal: updated, validation: optionValidation, order: simulatedOrder });
+      return;
     } else if (proposal.executionType === "long_option" && proposal.optionOrder) {
       const updated = await store.updateAlgoTradeProposal(proposal.id, {
         status: "blocked",
@@ -477,8 +564,9 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
 
     const updated = await store.updateAlgoTradeProposal(proposal.id, {
       status: "placed",
+      workflowStatus: "paper_submitted",
       validation,
-      targetRealism: validation?.targetRealism,
+      targetRealism: validation && "targetRealism" in validation ? validation.targetRealism : undefined,
       brokerOrder,
       reviewedAt: new Date().toISOString()
     });

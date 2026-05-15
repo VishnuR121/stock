@@ -31,7 +31,15 @@ export type StrategyKind =
   | "watch_only";
 export type StrategySuitability = "candidate" | "watch" | "research" | "avoid";
 export type AlgoProposalStatus = "queued" | "rejected" | "placed" | "blocked";
-export type AlgoExecutionType = "long_stock_bracket" | "short_stock_bracket" | "long_option" | "research_only";
+export type AlgoProposalWorkflowStatus =
+  | "idea_only"
+  | "needs_contract_selection"
+  | "blocked"
+  | "research_only"
+  | "paper_eligible"
+  | "paper_submitted"
+  | "internally_simulated";
+export type AlgoExecutionType = "long_stock_bracket" | "short_stock_bracket" | "internal_options_simulation" | "long_option" | "research_only";
 export type ExitUrgency = "hold" | "watch" | "exit";
 export type OpportunityCategory =
   | "bullish_long"
@@ -414,6 +422,7 @@ export interface AlgoTradeProposal {
   strategyTitle: string;
   direction: StrategyCandidate["direction"];
   status: AlgoProposalStatus;
+  workflowStatus?: AlgoProposalWorkflowStatus;
   executionType: AlgoExecutionType;
   horizon: TradeHorizon;
   expectedHoldingPeriod: string;
@@ -423,9 +432,21 @@ export interface AlgoTradeProposal {
   setup: string[];
   riskNotes: string[];
   warnings: string[];
+  blockedReasons?: string[];
+  howToFix?: string[];
+  expressionType?: TradeExpressionType;
+  requiredCapital?: number | null;
+  maxLoss?: number | null;
+  maxProfit?: number | null;
+  breakeven?: number | null;
+  dte?: number | null;
+  liquidityScore?: number | null;
+  paperExecutionMode?: PaperExecutionMode;
+  selectedContracts?: OptionLeg[];
   order?: PaperOrderRequest;
+  multiLegOrder?: MultiLegPaperOrder;
   optionOrder?: OptionOrderRequest;
-  validation?: PaperOrderValidationResult;
+  validation?: PaperOrderValidationResult | MultiLegPaperOrderValidationResult;
   targetRealism?: TargetRealismResult;
   brokerOrder?: unknown;
   reviewedAt?: string;

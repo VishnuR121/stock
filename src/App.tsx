@@ -631,8 +631,10 @@ export function App() {
         })
       });
       setAlgoProposals((current) => current.map((item) => item.id === proposal.id ? result.proposal : item));
-      setMessage(`${proposal.symbol} paper order placed from approved algo proposal.`);
-      await Promise.all([loadAccount(), loadPositions(), loadJournal(), loadPositionMonitor()]);
+      setMessage(result.proposal.workflowStatus === "internally_simulated"
+        ? `${proposal.symbol} options paper simulation created from approved algo proposal.`
+        : `${proposal.symbol} paper order placed from approved algo proposal.`);
+      await Promise.all([loadAccount(), loadPositions(), loadJournal(), loadPositionMonitor(), loadOptionsSimulation()]);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -1040,13 +1042,16 @@ export function App() {
         <>
           <BeginnerGuidance signal={activeSignal} plan={activeTradePlan} />
           <QuantPlanCard plan={activeQuantPlan} signal={activeSignal} />
-          <TradeExpressionPanel
-            result={activeTradeExpressions}
-            preference={expressionPreference}
-            busy={busy === "option-order"}
-            onPreferenceChange={setExpressionPreference}
-            onDraft={draftExpressionOrder}
-          />
+          <details className="advancedExpressionPanel">
+            <summary>Advanced: Compare position types</summary>
+            <TradeExpressionPanel
+              result={activeTradeExpressions}
+              preference={expressionPreference}
+              busy={busy === "option-order"}
+              onPreferenceChange={setExpressionPreference}
+              onDraft={draftExpressionOrder}
+            />
+          </details>
           <Sparkline bars={activeSignal.bars} />
           <MetricStrip signal={activeSignal} />
           <div className="notes">
@@ -2100,6 +2105,7 @@ function AlgoCommandCenter({
   const queuedCount = proposals.filter((proposal) => proposal.status === "queued").length;
   const placedCount = proposals.filter((proposal) => proposal.status === "placed").length;
   const blockedCount = proposals.filter((proposal) => proposal.status === "blocked").length;
+  const eligibleCount = proposals.filter((proposal) => proposal.workflowStatus === "paper_eligible").length;
   const duplicateCount = activeProposals.length - uniqueActiveProposals.length;
   const loading = busy === "algo";
   const filters: Array<{ value: AlgoQueueFilter; label: string; disabled?: boolean }> = [
@@ -2114,7 +2120,7 @@ function AlgoCommandCenter({
       <div className="panelTitle spaced">
         <div>
           <h2>Algo Command Center</h2>
-          <p>Bot-built trade proposals. You approve before any paper order is sent.</p>
+          <p>Main proposal queue. AI can suggest ideas, but deterministic validation decides paper eligibility.</p>
         </div>
         <button className="textButton" onClick={onGenerate} disabled={!activeSignal || loading}>
           {loading ? <Loader2 className="spin" size={17} /> : <Bot size={17} />}
@@ -2124,6 +2130,7 @@ function AlgoCommandCenter({
       <div className="algoSummary" aria-label="Algo proposal summary">
         <span>{proposals.length} saved</span>
         <span>{queuedCount} queued</span>
+        <span>{eligibleCount} paper eligible</span>
         <span>{placedCount} placed</span>
         {blockedCount ? <span>{blockedCount} blocked</span> : <span>0 blocked</span>}
         {duplicateCount > 0 && <span>{duplicateCount} duplicate hidden</span>}
@@ -2165,25 +2172,54 @@ function AlgoCommandCenter({
                   <strong>{proposal.symbol}</strong>
                   <span>{proposal.strategyTitle} - {proposal.direction}</span>
                 </div>
-                <em>{proposal.status}</em>
+                <em>{formatAlgoWorkflowStatus(proposal)}</em>
               </div>
               <p>{proposal.summary}</p>
               <div className="strategyStats">
                 <span>Score {proposal.score}</span>
-                <span>{proposal.executable ? `Executable ${formatHorizon(proposal.horizon ?? "intraday")} ${proposal.order ? "stock bracket" : "option entry"}` : "Research only"}</span>
+                <span>{proposal.executable ? `Paper eligible ${formatHorizon(proposal.horizon ?? "intraday")}` : formatAlgoWorkflowStatus(proposal)}</span>
+                {proposal.expressionType && <span>{formatExpressionType(proposal.expressionType)}</span>}
                 <span>{proposal.expectedHoldingPeriod ?? expectedHoldingPeriod(proposal.horizon ?? "intraday")}</span>
+                {proposal.paperExecutionMode && <span>{formatPaperMode(proposal.paperExecutionMode)}</span>}
+                {proposal.requiredCapital !== undefined && <span>Capital {formatOptionalCurrency(proposal.requiredCapital)}</span>}
+                {proposal.maxLoss !== undefined && <span>Max loss {formatOptionalCurrency(proposal.maxLoss)}</span>}
+                {proposal.maxProfit !== undefined && <span>Max profit {formatOptionalCurrency(proposal.maxProfit)}</span>}
+                {proposal.breakeven !== undefined && <span>BE {formatOptionalCurrency(proposal.breakeven)}</span>}
+                {proposal.dte !== undefined && <span>{formatDte(proposal.dte)} DTE</span>}
+                {proposal.liquidityScore !== undefined && <span>Liq {proposal.liquidityScore ?? "--"}</span>}
                 {proposal.order && <span>TIF {proposal.order.timeInForce.toUpperCase()}</span>}
                 {proposal.optionOrder && <span>TIF {proposal.optionOrder.timeInForce.toUpperCase()}</span>}
                 {proposal.order && <span>{proposal.order.quantity} shares</span>}
                 {proposal.optionOrder && <span>{proposal.optionOrder.contractSymbol}</span>}
                 {proposal.optionOrder && <span>{proposal.optionOrder.quantity} contract</span>}
                 {proposal.optionOrder?.limitPrice && <span>Limit {formatCurrency(proposal.optionOrder.limitPrice)}</span>}
-                {proposal.order && <span>Stop {formatCurrency(proposal.order.stopLossPrice)} {formatMovePct(proposal.targetRealism?.stopMovePct ?? proposal.validation?.levelDistances?.stopMovePct)}</span>}
-                {proposal.order && <span>Target {formatCurrency(proposal.order.takeProfitPrice)} {formatMovePct(proposal.targetRealism?.targetMovePct ?? proposal.validation?.levelDistances?.targetMovePct)}</span>}
+                {proposal.order && <span>Stop {formatCurrency(proposal.order.stopLossPrice)} {formatMovePct(proposal.targetRealism?.stopMovePct ?? getPaperOrderLevelDistances(proposal)?.stopMovePct)}</span>}
+                {proposal.order && <span>Target {formatCurrency(proposal.order.takeProfitPrice)} {formatMovePct(proposal.targetRealism?.targetMovePct ?? getPaperOrderLevelDistances(proposal)?.targetMovePct)}</span>}
               </div>
+              {proposal.selectedContracts?.length ? (
+                <div className="optionLegList compact">
+                  {proposal.selectedContracts.map((leg) => (
+                    <span key={`${proposal.id}-${leg.optionSymbol}-${leg.side}`}>
+                      {leg.side.toUpperCase()} {leg.quantity} {leg.optionType} {leg.strike} {leg.expiration}
+                    </span>
+                  ))}
+                </div>
+              ) : proposal.workflowStatus === "needs_contract_selection" ? (
+                <div className="contextWarnings">
+                  <p>No exact option contracts/legs are selected yet.</p>
+                </div>
+              ) : null}
               {proposal.targetRealism?.message && <small>{proposal.targetRealism.message}</small>}
+              {proposal.blockedReasons?.[0] && <small>{proposal.blockedReasons[0]}</small>}
+              {proposal.howToFix?.[0] && <small>Next: {proposal.howToFix[0]}</small>}
               {proposal.warnings[0] && <small>{proposal.warnings[0]}</small>}
               <div className="algoActions">
+                {proposal.workflowStatus === "needs_contract_selection" && (
+                  <button className="textButton secondary" type="button" disabled title="Contract selector is not available until a valid contract universe is loaded">
+                    <Search size={16} />
+                    <span>Select contracts</span>
+                  </button>
+                )}
                 <button
                   className="textButton"
                   onClick={() => onExecute(proposal)}
@@ -4324,6 +4360,16 @@ function formatPaperMode(mode?: string): string {
   if (mode === "internal_simulation") return "Internal simulation";
   if (mode === "research_only") return "Research only";
   return "--";
+}
+
+function formatAlgoWorkflowStatus(proposal: AlgoTradeProposal): string {
+  const status = proposal.workflowStatus ?? (proposal.status === "placed" ? "paper_submitted" : proposal.status === "blocked" ? "blocked" : proposal.status === "rejected" ? "research_only" : "idea_only");
+  return status.replaceAll("_", " ");
+}
+
+function getPaperOrderLevelDistances(proposal: AlgoTradeProposal) {
+  const validation = proposal.validation;
+  return validation && "levelDistances" in validation ? validation.levelDistances : undefined;
 }
 
 function getExpressionWarnings(expression: TradeExpression): string[] {

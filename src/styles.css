@@ -2304,6 +2304,22 @@ select {
   background: var(--surface-soft);
 }
 
+.advancedExpressionPanel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface-muted);
+}
+
+.advancedExpressionPanel summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  font-weight: 850;
+}
+
 .expressionHeader {
   align-items: center;
 }
