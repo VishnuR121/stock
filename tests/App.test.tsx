@@ -265,6 +265,24 @@ describe("dashboard", () => {
     expect(screen.getByText("XLI breakout 5")).toBeInTheDocument();
   });
 
+  it("shows blocked option reasons and keeps contract selection actionable", async () => {
+    algoProposals = [makeBlockedOptionProposal(), ...makeAlgoProposals()];
+    render(<App />);
+
+    await screen.findAllByText("SPY");
+    fireEvent.click(screen.getByRole("button", { name: /^Algo$/i }));
+
+    expect(await screen.findByText("Why blocked")).toBeInTheDocument();
+    expect(screen.getByText("0DTE options are blocked by default.")).toBeInTheDocument();
+    expect(screen.getByText("Open interest is required for AAPL0DTEC00155000.")).toBeInTheDocument();
+    expect(screen.getByText("How to fix")).toBeInTheDocument();
+    expect(screen.getByText("Choose a later expiration; 0DTE is blocked by default.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Change contracts$/i }));
+    expect(await screen.findByRole("dialog", { name: /Select Algo option contracts/i })).toBeInTheDocument();
+    expect(screen.getByText("No option contracts are loaded for this ticker. Refresh options data before selecting contracts.")).toBeInTheDocument();
+  });
+
   it("can delete algo proposals and journal entries from the dashboard", async () => {
     render(<App />);
 
@@ -516,6 +534,57 @@ function makeAlgoProposals(): AlgoTradeProposal[] {
       acceptedRisk: true
     }
   }));
+}
+
+function makeBlockedOptionProposal(): AlgoTradeProposal {
+  return {
+    id: "algo-blocked-option",
+    createdAt: "2026-05-12T12:20:00.000Z",
+    updatedAt: "2026-05-12T12:30:00.000Z",
+    symbol: "AAPL",
+    sourceAnalysisId: "analysis-option",
+    signalAsOf: "2026-05-12T12:00:00.000Z",
+    strategyKind: "long_call",
+    strategyTitle: "Long call",
+    direction: "bullish",
+    status: "blocked",
+    workflowStatus: "blocked",
+    executionType: "research_only",
+    horizon: "options_short_term",
+    expectedHoldingPeriod: "30-60 DTE options proposal",
+    executable: false,
+    score: 72,
+    summary: "Bullish option idea with invalid selected contract.",
+    setup: [],
+    riskNotes: [],
+    warnings: ["0DTE options are blocked by default."],
+    blockedReasons: [
+      "0DTE options are blocked by default.",
+      "Open interest is required for AAPL0DTEC00155000."
+    ],
+    howToFix: [
+      "Choose a later expiration; 0DTE is blocked by default.",
+      "Choose contracts with reported open interest."
+    ],
+    expressionType: "long_call",
+    selectedContracts: [
+      {
+        optionSymbol: "AAPL0DTEC00155000",
+        underlyingSymbol: "AAPL",
+        optionType: "call",
+        side: "buy",
+        quantity: 1,
+        strike: 155,
+        expiration: "2026-05-14",
+        estimatedMid: 4.5
+      }
+    ],
+    requiredCapital: 450,
+    maxLoss: 450,
+    breakeven: 159.5,
+    dte: 0,
+    paperExecutionMode: "internal_simulation"
+  };
 }
 
 function makeBacktestResult() {

@@ -2215,7 +2215,9 @@ function AlgoCommandCenter({
         <div className="algoEmpty">{proposals.length ? "No proposals match this view." : "Generate proposals from a selected ticker to create an approval queue."}</div>
       ) : (
         <div className="algoList">
-          {visible.map((proposal) => (
+          {visible.map((proposal) => {
+            const contractAction = getAlgoContractAction(proposal);
+            return (
             <article key={proposal.id} className={`algoCard ${proposal.status}`}>
               <div className="algoTopline">
                 <div>
@@ -2260,11 +2262,9 @@ function AlgoCommandCenter({
                 </div>
               ) : null}
               {proposal.targetRealism?.message && <small>{proposal.targetRealism.message}</small>}
-              {proposal.blockedReasons?.[0] && <small>{proposal.blockedReasons[0]}</small>}
-              {proposal.howToFix?.[0] && <small>Next: {proposal.howToFix[0]}</small>}
-              {proposal.warnings[0] && <small>{proposal.warnings[0]}</small>}
+              <AlgoProposalDecisionDetails proposal={proposal} />
               <div className="algoActions">
-                {proposal.workflowStatus === "needs_contract_selection" && (
+                {contractAction && (
                   <button
                     className="textButton secondary"
                     type="button"
@@ -2273,7 +2273,7 @@ function AlgoCommandCenter({
                     title="Select exact option contract legs and run deterministic validation"
                   >
                     {busy === `algo-contracts-${proposal.id}` ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
-                    <span>Select contracts</span>
+                    <span>{contractAction}</span>
                   </button>
                 )}
                 <button
@@ -2303,10 +2303,48 @@ function AlgoCommandCenter({
                 </button>
               </div>
             </article>
-          ))}
+          );
+          })}
         </div>
       )}
     </section>
+  );
+}
+
+function AlgoProposalDecisionDetails({ proposal }: { proposal: AlgoTradeProposal }) {
+  const blockedReasons = uniqueStrings(proposal.blockedReasons);
+  const fixes = uniqueStrings(proposal.howToFix);
+  const warnings = uniqueStrings(proposal.warnings).filter((warning) => !blockedReasons.includes(warning));
+  if (!blockedReasons.length && !fixes.length && !warnings.length && !proposal.targetRealism?.message) return null;
+
+  return (
+    <div className="algoDecisionDetails" aria-label={`${proposal.symbol} proposal validation details`}>
+      {proposal.targetRealism?.message && <p>{proposal.targetRealism.message}</p>}
+      {blockedReasons.length > 0 && (
+        <div>
+          <span>Why blocked</span>
+          <ul>
+            {blockedReasons.slice(0, 4).map((reason) => <li key={reason}>{reason}</li>)}
+          </ul>
+        </div>
+      )}
+      {fixes.length > 0 && (
+        <div>
+          <span>How to fix</span>
+          <ul>
+            {fixes.slice(0, 4).map((fix) => <li key={fix}>{fix}</li>)}
+          </ul>
+        </div>
+      )}
+      {warnings.length > 0 && (
+        <div>
+          <span>Warnings</span>
+          <ul>
+            {warnings.slice(0, 3).map((warning) => <li key={warning}>{warning}</li>)}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -4599,6 +4637,23 @@ function getExpressionWarnings(expression: TradeExpression): string[] {
     ...expression.assignmentWarnings,
     ...expression.statusReasons
   ].filter(Boolean);
+}
+
+function getAlgoContractAction(proposal: AlgoTradeProposal): string | null {
+  if (!isOptionsAlgoProposal(proposal)) return null;
+  if (proposal.status === "placed" || proposal.status === "rejected") return null;
+  if (proposal.workflowStatus === "paper_eligible" && proposal.selectedContracts?.length) return "Change contracts";
+  if (proposal.workflowStatus === "blocked" || proposal.status === "blocked") return proposal.selectedContracts?.length ? "Change contracts" : "Select contracts";
+  if (proposal.workflowStatus === "needs_contract_selection") return "Select contracts";
+  return null;
+}
+
+function isOptionsAlgoProposal(proposal: AlgoTradeProposal): boolean {
+  return ["long_call", "long_put", "call_debit_spread", "put_debit_spread", "covered_call", "cash_secured_put"].includes(proposal.strategyKind);
+}
+
+function uniqueStrings(items?: string[]): string[] {
+  return [...new Set((items ?? []).filter((item) => typeof item === "string" && item.trim().length > 0))];
 }
 
 type ContractSelectorConfig = {

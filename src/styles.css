@@ -1064,6 +1064,42 @@ h3 {
   margin: 0;
 }
 
+.algoDecisionDetails {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 9px;
+  background: var(--surface);
+}
+
+.algoDecisionDetails div {
+  display: grid;
+  gap: 4px;
+}
+
+.algoDecisionDetails span {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.algoDecisionDetails ul {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.algoDecisionDetails p {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
 .algoActions .textButton {
   min-height: 34px;
   padding: 0 10px;
