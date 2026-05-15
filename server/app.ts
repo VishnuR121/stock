@@ -37,6 +37,7 @@ import type {
   AnalysisMode,
   RiskSettings,
   SignalSnapshot,
+  StrategyKind,
   TradeAction,
   TradeContext,
   TradeExpressionType,
@@ -404,6 +405,140 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       rejectionReason: optionalString(request.body?.reason) ?? "Rejected after review."
     });
     response.json({ proposal });
+  }));
+
+  app.post("/api/algo/proposals/:id/select-contracts", asyncHandler(async (request, response) => {
+    const proposal = await getAlgoProposal(store, request.params.id);
+    const expressionType = getExpressionTypeForStrategy(proposal.strategyKind);
+    if (!expressionType || expressionType === "long_equity" || expressionType === "short_equity" || expressionType === "no_trade") {
+      response.status(400).json({ error: "Contract selection is only available for options Algo proposals." });
+      return;
+    }
+
+    const rawOrder = request.body?.multiLegOrder ?? request.body?.order ?? request.body;
+    const rawLegs = Array.isArray(rawOrder?.legs) ? rawOrder.legs : [];
+    if (!rawLegs.length) {
+      const updated = await store.updateAlgoTradeProposal(proposal.id, {
+        status: "queued",
+        workflowStatus: "needs_contract_selection",
+        executable: false,
+        executionType: "research_only",
+        blockedReasons: [],
+        howToFix: ["Select exact option contract legs before validation."],
+        warnings: [...new Set([...proposal.warnings, "No contract selected."])]
+      });
+      response.json({ proposal: updated });
+      return;
+    }
+
+    const order: MultiLegPaperOrderRequest = {
+      ...rawOrder,
+      expressionType,
+      underlyingSymbol: normalizeSymbol(String(rawOrder?.underlyingSymbol ?? proposal.symbol)),
+      timeHorizon: optionalString(rawOrder?.timeHorizon) ?? proposal.expectedHoldingPeriod ?? "30-60 DTE options proposal",
+      earningsChecked: true,
+      confirmedPaperOnly: true,
+      acceptedRisk: true,
+      maxLossAcknowledged: true,
+      paperSimulationAcknowledged: true,
+      noLiveEndpointAcknowledged: true,
+      sourceAnalysisId: proposal.sourceAnalysisId,
+      sourceSignalAsOf: proposal.signalAsOf,
+      followedPlan: true
+    };
+
+    const riskSettings = await store.getRiskSettings();
+    const alpacaPaperOnly = isPaperAlpacaUrl(config.alpacaPaperBaseUrl);
+    const [account, positionsResponse, journal, knownContracts] = await Promise.all([
+      alpaca.getAccount(),
+      safePositions(alpaca),
+      store.getJournal(),
+      getOptionsForExpression(store, alpaca, order.underlyingSymbol)
+    ]);
+    const riskProfile = getRiskProfile(account.equity ?? 100000, riskSettings);
+    const upfrontErrors: string[] = [];
+    if (order.expressionType === "covered_call" && getHeldLongShares(positionsResponse.positions, order.underlyingSymbol) < 100) {
+      upfrontErrors.push("Covered calls require at least 100 long shares of the underlying.");
+    }
+    const missingContracts = knownContracts.length
+      ? order.legs
+        .map((leg) => leg.optionSymbol)
+        .filter((symbol) => !knownContracts.some((contract) => contract.symbol === symbol))
+      : [];
+    if (missingContracts.length) {
+      upfrontErrors.push(`Option contract validation failed for: ${missingContracts.join(", ")}.`);
+    }
+
+    const validation = validateMultiLegPaperOrder(order, riskProfile, riskSettings, {
+      buyingPower: account.buyingPower ?? account.cash ?? account.equity,
+      alpacaPaperOnly,
+      ...getOpenPaperOptionsExposure(journal, order.underlyingSymbol)
+    });
+    if (!knownContracts.length) {
+      validation.warnings.push("Provider contract validation was unavailable; verify the contracts manually before relying on the simulation.");
+    }
+
+    if (upfrontErrors.length) {
+      validation.errors = [...new Set([...upfrontErrors, ...validation.errors])];
+      validation.ok = false;
+    }
+
+    const stats = getSelectedContractStats(order);
+    const warnings = [...new Set([
+      ...proposal.warnings.filter((warning) => warning !== "Needs exact contract selection before paper simulation." && warning !== "No contract selected."),
+      ...validation.warnings,
+      ...validation.errors
+    ])].slice(0, 10);
+
+    if (!validation.ok || !validation.order) {
+      const updated = await store.updateAlgoTradeProposal(proposal.id, {
+        status: "blocked",
+        workflowStatus: "blocked",
+        executable: false,
+        executionType: "research_only",
+        expressionType,
+        selectedContracts: order.legs,
+        multiLegOrder: order,
+        requiredCapital: order.requiredCapital,
+        maxLoss: order.maxLoss,
+        maxProfit: order.maxProfit,
+        breakeven: order.breakeven,
+        dte: stats.dte,
+        liquidityScore: stats.liquidityScore,
+        paperExecutionMode: order.paperExecutionMode,
+        validation,
+        blockedReasons: validation.errors,
+        howToFix: getOptionValidationFixes(validation.errors),
+        warnings
+      });
+      response.json({ proposal: updated, validation });
+      return;
+    }
+
+    const updated = await store.updateAlgoTradeProposal(proposal.id, {
+      status: "queued",
+      workflowStatus: "paper_eligible",
+      executable: true,
+      executionType: "internal_options_simulation",
+      expressionType,
+      selectedContracts: validation.order.legs,
+      multiLegOrder: validation.order,
+      requiredCapital: validation.order.requiredCapital,
+      maxLoss: validation.order.maxLoss,
+      maxProfit: validation.order.maxProfit,
+      breakeven: validation.order.breakeven,
+      dte: stats.dte,
+      liquidityScore: stats.liquidityScore,
+      paperExecutionMode: validation.order.paperExecutionMode,
+      validation,
+      blockedReasons: [],
+      howToFix: ["Review warnings, confirm paper-only execution, then approve the internal simulation from this Algo card."],
+      warnings: [...new Set([
+        ...warnings,
+        "Options are internally simulated paper trades, not broker options submissions."
+      ])].slice(0, 10)
+    });
+    response.json({ proposal: updated, validation });
   }));
 
   app.delete("/api/algo/proposals/:id", asyncHandler(async (request, response) => {
@@ -1390,6 +1525,56 @@ async function getAlgoProposal(store: AppStore, id: string): Promise<AlgoTradePr
   const proposal = (await store.getAlgoTradeProposals(100)).find((item) => item.id === id);
   if (!proposal) throw new Error("Algo trade proposal not found.");
   return proposal;
+}
+
+function getExpressionTypeForStrategy(strategyKind: StrategyKind): TradeExpressionType | null {
+  const map: Partial<Record<StrategyKind, TradeExpressionType>> = {
+    long_stock: "long_equity",
+    short_stock: "short_equity",
+    long_call: "long_call",
+    long_put: "long_put",
+    call_debit_spread: "bull_call_debit_spread",
+    put_debit_spread: "bear_put_debit_spread",
+    covered_call: "covered_call",
+    cash_secured_put: "cash_secured_put",
+    watch_only: "no_trade"
+  };
+  return map[strategyKind] ?? null;
+}
+
+function getSelectedContractStats(order: MultiLegPaperOrderRequest) {
+  const now = new Date();
+  const dtes = order.legs.map((leg) => getLegDte(leg.expiration, now)).filter((dte) => Number.isFinite(dte));
+  const liquidityScores = order.legs
+    .map((leg) => leg.liquidityScore)
+    .filter((score): score is number => typeof score === "number" && Number.isFinite(score));
+  return {
+    dte: dtes.length ? Math.min(...dtes) : null,
+    liquidityScore: liquidityScores.length
+      ? Math.round(liquidityScores.reduce((sum, score) => sum + score, 0) / liquidityScores.length)
+      : null
+  };
+}
+
+function getLegDte(expiration: string, now: Date): number {
+  if (expiration === now.toISOString().slice(0, 10)) return 0;
+  const expirationTime = new Date(`${expiration}T21:00:00.000Z`).getTime();
+  if (!Number.isFinite(expirationTime)) return 0;
+  return Math.ceil((expirationTime - now.getTime()) / 86400000);
+}
+
+function getOptionValidationFixes(errors: string[]): string[] {
+  if (!errors.length) return ["Review the selected contracts and try validation again."];
+  return errors.map((error) => {
+    if (error.includes("0DTE")) return "Choose a later expiration; 0DTE is blocked by default.";
+    if (error.includes("Open interest")) return "Choose contracts with reported open interest.";
+    if (error.includes("Missing price")) return "Choose contracts with bid/ask, mid, or last pricing.";
+    if (error.includes("buying power")) return "Reduce size, choose cheaper legs, or increase paper buying power.";
+    if (error.includes("Covered calls")) return "Hold at least 100 long shares or use a different defined-risk idea.";
+    if (error.includes("Undefined-risk") || error.includes("naked")) return "Use a covered, cash-secured, long option, or defined-risk spread structure.";
+    if (error.includes("contract validation failed")) return "Pick contracts from the loaded provider chain for this underlying.";
+    return error;
+  });
 }
 
 function optionalString(value: unknown): string | undefined {

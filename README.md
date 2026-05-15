@@ -52,7 +52,7 @@ This is an educational research and paper-trading tool. It is not financial advi
 - **Research:** watchlist scans, opportunity scan, ranked setups, symbol detail, quant plan, Decision Center, AI plan, context, options research, and advanced Trade Expression comparison.
 - **Trade Plan:** deterministic quant plan, expression comparison, AI explanation, journal actions, and paper-order drafting for the active setup.
 - **Backtests:** historical strategy test, market-regime filters, summary metrics, equity curve table, trade table, and SPY comparison.
-- **Algo:** main AI/deterministic proposal queue. Stock proposals can become broker-paper orders. Options proposals must show exact selected contracts/legs and pass deterministic validation before internal paper simulation.
+- **Algo:** main AI/deterministic proposal queue. Stock proposals can become broker-paper orders. Options proposals use **Select contracts** to choose exact legs, recalculate max loss/profit/breakeven, and pass deterministic validation before internal paper simulation.
 - **Positions / Orders:** paper positions, equity paper orders, internally simulated options paper entries, position monitor, close/flatten controls, and safety controls.
 - **Journal:** filterable watching, open, closed, and skipped journal entries with paper-trade analytics.
 - **Settings:** paper account details, appearance, risk controls, kill switch, and API/data-provider status.

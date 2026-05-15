@@ -33,9 +33,11 @@ import type {
   JournalExitReason,
   MarketRegimeLabel,
   MarketRegimeSnapshot,
+  MultiLegPaperOrder,
   MultiLegPaperOrderRequest,
   OpportunityCandidate,
   OpportunityScan,
+  OptionLeg,
   OptionIdea,
   PaperOrderRequest,
   PositionMonitorSnapshot,
@@ -45,6 +47,7 @@ import type {
   SignalSnapshot,
   SimulatedOptionsPosition,
   SimulatedOptionsSnapshot,
+  StrategyKind,
   TradeAction,
   TradeHorizon,
   TradeContext,
@@ -151,6 +154,7 @@ export function App() {
   const [marketRegime, setMarketRegime] = useState<MarketRegimeSnapshot | null>(null);
   const [orderDraft, setOrderDraft] = useState<PaperOrderRequest>(emptyOrder);
   const [optionOrderDraft, setOptionOrderDraft] = useState<MultiLegPaperOrderRequest | null>(null);
+  const [contractSelectorProposal, setContractSelectorProposal] = useState<AlgoTradeProposal | null>(null);
   const [reviewingOrder, setReviewingOrder] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -668,6 +672,39 @@ export function App() {
       });
       setAlgoProposals((current) => current.filter((item) => item.id !== proposal.id));
       setMessage(`${proposal.symbol} algo proposal deleted.`);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function openAlgoContractSelector(proposal: AlgoTradeProposal) {
+    setBusy(`algo-contracts-${proposal.id}`);
+    setMessage(null);
+    try {
+      await loadOptions(proposal.symbol);
+      setContractSelectorProposal(proposal);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function selectAlgoContracts(proposal: AlgoTradeProposal, multiLegOrder: MultiLegPaperOrder) {
+    setBusy(`algo-select-${proposal.id}`);
+    setMessage(null);
+    try {
+      const result = await api<{ proposal: AlgoTradeProposal }>(`/api/algo/proposals/${proposal.id}/select-contracts`, {
+        method: "POST",
+        body: JSON.stringify({ multiLegOrder })
+      });
+      setAlgoProposals((current) => current.map((item) => item.id === proposal.id ? result.proposal : item));
+      setContractSelectorProposal(null);
+      setMessage(result.proposal.workflowStatus === "paper_eligible"
+        ? `${proposal.symbol} contracts selected and validated. The Algo proposal is paper eligible for internal simulation.`
+        : `${proposal.symbol} contracts selected, but validation blocked the proposal.`);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -1379,6 +1416,7 @@ export function App() {
                 onExecute={executeAlgoProposal}
                 onReject={rejectAlgoProposal}
                 onDelete={deleteAlgoProposal}
+                onSelectContracts={openAlgoContractSelector}
               />
             </div>
           )}
@@ -1496,6 +1534,16 @@ export function App() {
           onChange={setOptionOrderDraft}
           onClose={() => setOptionOrderDraft(null)}
           onSubmit={submitMultiLegPaperOrder}
+        />
+      )}
+
+      {contractSelectorProposal && (
+        <AlgoContractSelectorModal
+          proposal={contractSelectorProposal}
+          options={optionsBySymbol[contractSelectorProposal.symbol] ?? []}
+          busy={busy === `algo-select-${contractSelectorProposal.id}`}
+          onClose={() => setContractSelectorProposal(null)}
+          onSubmit={(order) => selectAlgoContracts(contractSelectorProposal, order)}
         />
       )}
     </main>
@@ -2062,7 +2110,8 @@ function AlgoCommandCenter({
   onGenerate,
   onExecute,
   onReject,
-  onDelete
+  onDelete,
+  onSelectContracts
 }: {
   activeSignal: SignalSnapshot | null;
   proposals: AlgoTradeProposal[];
@@ -2075,6 +2124,7 @@ function AlgoCommandCenter({
   onExecute: (proposal: AlgoTradeProposal) => void;
   onReject: (proposal: AlgoTradeProposal) => void;
   onDelete: (proposal: AlgoTradeProposal) => void;
+  onSelectContracts: (proposal: AlgoTradeProposal) => void;
 }) {
   const statusOrder: Record<AlgoTradeProposal["status"], number> = {
     queued: 0,
@@ -2215,8 +2265,14 @@ function AlgoCommandCenter({
               {proposal.warnings[0] && <small>{proposal.warnings[0]}</small>}
               <div className="algoActions">
                 {proposal.workflowStatus === "needs_contract_selection" && (
-                  <button className="textButton secondary" type="button" disabled title="Contract selector is not available until a valid contract universe is loaded">
-                    <Search size={16} />
+                  <button
+                    className="textButton secondary"
+                    type="button"
+                    onClick={() => onSelectContracts(proposal)}
+                    disabled={busy === `algo-contracts-${proposal.id}`}
+                    title="Select exact option contract legs and run deterministic validation"
+                  >
+                    {busy === `algo-contracts-${proposal.id}` ? <Loader2 className="spin" size={16} /> : <Search size={16} />}
                     <span>Select contracts</span>
                   </button>
                 )}
@@ -3019,6 +3075,169 @@ function PaperOrderForm({
         <span>Review order</span>
       </button>
     </form>
+  );
+}
+
+function AlgoContractSelectorModal({
+  proposal,
+  options,
+  busy,
+  onClose,
+  onSubmit
+}: {
+  proposal: AlgoTradeProposal;
+  options: OptionIdea[];
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (order: MultiLegPaperOrder) => void;
+}) {
+  const config = useMemo(() => getContractSelectorConfig(proposal.strategyKind), [proposal.strategyKind]);
+  const [primarySymbol, setPrimarySymbol] = useState("");
+  const [secondarySymbol, setSecondarySymbol] = useState("");
+  const relevantOptions = useMemo(() => getSortedSelectorOptions(options), [options]);
+  const primaryOptions = useMemo(() => (
+    config ? relevantOptions.filter((option) => option.type === config.primary.optionType) : []
+  ), [config, relevantOptions]);
+  const primary = primaryOptions.find((option) => option.symbol === primarySymbol) ?? null;
+  const secondaryOptions = useMemo(() => (
+    config?.secondary ? relevantOptions.filter((option) => isCompatibleSecondaryOption(option, primary, config)) : []
+  ), [config, primary, relevantOptions]);
+  const secondary = secondaryOptions.find((option) => option.symbol === secondarySymbol) ?? null;
+  const order = config ? buildAlgoContractOrder(proposal, config, primary, secondary) : null;
+  const selectorWarnings = getSelectorWarnings(config, primary, secondary, order, options.length);
+
+  useEffect(() => {
+    const defaultPrimary = primaryOptions.find(isPreferredSelectorOption) ?? primaryOptions[0];
+    setPrimarySymbol(defaultPrimary?.symbol ?? "");
+  }, [proposal.id, primaryOptions]);
+
+  useEffect(() => {
+    if (!config?.secondary) {
+      setSecondarySymbol("");
+      return;
+    }
+    const defaultSecondary = secondaryOptions.find(isPreferredSelectorOption) ?? secondaryOptions[0];
+    setSecondarySymbol(defaultSecondary?.symbol ?? "");
+  }, [proposal.id, primarySymbol, secondaryOptions, config?.secondary]);
+
+  return (
+    <div className="modalOverlay" role="presentation">
+      <section className="modal contractSelectorModal" role="dialog" aria-modal="true" aria-label="Select Algo option contracts">
+        <div className="panelTitle spaced">
+          <div>
+            <h2>Select contracts</h2>
+            <p>{proposal.symbol} / {proposal.strategyTitle}</p>
+          </div>
+          <button className="iconButton" onClick={onClose} aria-label="Close contract selector">
+            x
+          </button>
+        </div>
+
+        {!config ? (
+          <EmptyState text="This Algo proposal does not use option contracts." />
+        ) : (
+          <>
+            <div className="contractSelectorGrid">
+              <label>
+                <span>{config.primary.label}</span>
+                <select value={primarySymbol} onChange={(event) => setPrimarySymbol(event.target.value)}>
+                  <option value="">Select contract</option>
+                  {primaryOptions.map((option) => (
+                    <option key={option.symbol} value={option.symbol}>
+                      {formatContractOptionLabel(option)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {config.secondary && (
+                <label>
+                  <span>{config.secondary.label}</span>
+                  <select value={secondarySymbol} onChange={(event) => setSecondarySymbol(event.target.value)} disabled={!primary}>
+                    <option value="">Select contract</option>
+                    {secondaryOptions.map((option) => (
+                      <option key={option.symbol} value={option.symbol}>
+                        {formatContractOptionLabel(option)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
+
+            <div className="contractSelectorDetails">
+              {[primary, secondary].filter(Boolean).map((option) => (
+                <ContractSelectorLegCard key={(option as OptionIdea).symbol} option={option as OptionIdea} />
+              ))}
+            </div>
+
+            {order && (
+              <dl className="reviewList contractReviewList">
+                <div>
+                  <dt>Mode</dt>
+                  <dd>{formatPaperMode(order.paperExecutionMode)}</dd>
+                </div>
+                <div>
+                  <dt>Capital</dt>
+                  <dd>{formatCurrency(order.requiredCapital)}</dd>
+                </div>
+                <div>
+                  <dt>Max loss</dt>
+                  <dd>{formatCurrency(order.maxLoss)}</dd>
+                </div>
+                <div>
+                  <dt>Max profit</dt>
+                  <dd>{formatOptionalCurrency(order.maxProfit ?? null)}</dd>
+                </div>
+                <div>
+                  <dt>Breakeven</dt>
+                  <dd>{formatOptionalCurrency(order.breakeven ?? null)}</dd>
+                </div>
+                <div>
+                  <dt>Debit / credit</dt>
+                  <dd>{order.estimatedDebit !== undefined ? formatCurrency(order.estimatedDebit) : order.estimatedCredit !== undefined ? formatCurrency(order.estimatedCredit) : "--"}</dd>
+                </div>
+              </dl>
+            )}
+
+            {selectorWarnings.length > 0 && (
+              <div className="contextWarnings">
+                {selectorWarnings.map((warning) => (
+                  <p key={warning}>{warning}</p>
+                ))}
+              </div>
+            )}
+
+            <button className="wideButton" onClick={() => order && onSubmit(order)} disabled={busy || !order}>
+              {busy ? <Loader2 className="spin" size={17} /> : <ShieldCheck size={17} />}
+              <span>Validate selected contracts</span>
+            </button>
+          </>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function ContractSelectorLegCard({ option }: { option: OptionIdea }) {
+  return (
+    <article className="contractLegCard">
+      <div>
+        <span>{option.type.toUpperCase()} {formatCurrency(option.strikePrice)} / {option.expirationDate}</span>
+        <strong>{option.symbol}</strong>
+      </div>
+      <div className="contractLegMetrics">
+        <span>DTE {formatDte(option.daysToExpiration)}</span>
+        <span>Bid {formatOptionalCurrency(option.bidPrice ?? null)}</span>
+        <span>Ask {formatOptionalCurrency(option.askPrice ?? null)}</span>
+        <span>Mid {formatOptionalCurrency(getOptionUnitPrice(option))}</span>
+        <span>OI {option.openInterest ?? "--"}</span>
+        <span>Vol {option.volume ?? "--"}</span>
+        <span>Spread {formatOptionalPct(getOptionSpreadPct(option))}</span>
+        <span>IV {formatOptionalPct(option.impliedVolatility)}</span>
+        <span>Delta {formatNumber(option.delta)}</span>
+      </div>
+    </article>
   );
 }
 
@@ -4380,6 +4599,256 @@ function getExpressionWarnings(expression: TradeExpression): string[] {
     ...expression.assignmentWarnings,
     ...expression.statusReasons
   ].filter(Boolean);
+}
+
+type ContractSelectorConfig = {
+  expressionType: MultiLegPaperOrder["expressionType"];
+  primary: {
+    label: string;
+    optionType: "call" | "put";
+    side: "buy" | "sell";
+  };
+  secondary?: {
+    label: string;
+    optionType: "call" | "put";
+    side: "buy" | "sell";
+  };
+};
+
+function getContractSelectorConfig(strategyKind: StrategyKind): ContractSelectorConfig | null {
+  const configs: Partial<Record<StrategyKind, ContractSelectorConfig>> = {
+    long_call: {
+      expressionType: "long_call",
+      primary: { label: "Buy call", optionType: "call", side: "buy" }
+    },
+    long_put: {
+      expressionType: "long_put",
+      primary: { label: "Buy put", optionType: "put", side: "buy" }
+    },
+    call_debit_spread: {
+      expressionType: "bull_call_debit_spread",
+      primary: { label: "Buy lower-strike call", optionType: "call", side: "buy" },
+      secondary: { label: "Sell higher-strike call", optionType: "call", side: "sell" }
+    },
+    put_debit_spread: {
+      expressionType: "bear_put_debit_spread",
+      primary: { label: "Buy higher-strike put", optionType: "put", side: "buy" },
+      secondary: { label: "Sell lower-strike put", optionType: "put", side: "sell" }
+    },
+    covered_call: {
+      expressionType: "covered_call",
+      primary: { label: "Sell covered call", optionType: "call", side: "sell" }
+    },
+    cash_secured_put: {
+      expressionType: "cash_secured_put",
+      primary: { label: "Sell cash-secured put", optionType: "put", side: "sell" }
+    }
+  };
+  return configs[strategyKind] ?? null;
+}
+
+function getSortedSelectorOptions(options: OptionIdea[]): OptionIdea[] {
+  return [...options].sort((left, right) => {
+    const dteDelta = Math.abs((left.daysToExpiration ?? 999) - 45) - Math.abs((right.daysToExpiration ?? 999) - 45);
+    if (dteDelta !== 0) return dteDelta;
+    const liquidityDelta = (right.liquidityScore ?? 0) - (left.liquidityScore ?? 0);
+    if (liquidityDelta !== 0) return liquidityDelta;
+    return left.strikePrice - right.strikePrice;
+  });
+}
+
+function isPreferredSelectorOption(option: OptionIdea): boolean {
+  return (option.daysToExpiration ?? 0) >= 21
+    && (option.daysToExpiration ?? 0) <= 90
+    && getOptionUnitPrice(option) !== null
+    && (option.openInterest ?? 0) >= 100;
+}
+
+function isCompatibleSecondaryOption(option: OptionIdea, primary: OptionIdea | null, config: ContractSelectorConfig): boolean {
+  if (!config.secondary || option.type !== config.secondary.optionType) return false;
+  if (!primary) return true;
+  if (option.expirationDate !== primary.expirationDate) return false;
+  if (config.expressionType === "bull_call_debit_spread") return option.strikePrice > primary.strikePrice;
+  if (config.expressionType === "bear_put_debit_spread") return option.strikePrice < primary.strikePrice;
+  return true;
+}
+
+function buildAlgoContractOrder(
+  proposal: AlgoTradeProposal,
+  config: ContractSelectorConfig,
+  primary: OptionIdea | null,
+  secondary: OptionIdea | null
+): MultiLegPaperOrder | null {
+  if (!primary) return null;
+  if (config.secondary && !secondary) return null;
+  const primaryPrice = getOptionUnitPrice(primary) ?? 0;
+  const secondaryPrice = secondary ? getOptionUnitPrice(secondary) ?? 0 : 0;
+  const primaryLeg = optionIdeaToLeg(primary, config.primary.side);
+  const secondaryLeg = secondary && config.secondary ? optionIdeaToLeg(secondary, config.secondary.side) : null;
+  const legs: OptionLeg[] = secondaryLeg ? [primaryLeg, secondaryLeg] : [primaryLeg];
+  const multiplier = 100;
+
+  if (config.expressionType === "long_call" || config.expressionType === "long_put") {
+    const debit = roundMoney(Math.max(0.01, primaryPrice * multiplier));
+    return {
+      expressionType: config.expressionType,
+      underlyingSymbol: proposal.symbol,
+      legs,
+      estimatedDebit: debit,
+      maxLoss: debit,
+      maxProfit: undefined,
+      breakeven: roundMoney(config.expressionType === "long_call" ? primary.strikePrice + primaryPrice : primary.strikePrice - primaryPrice),
+      requiredCapital: debit,
+      paperExecutionMode: "internal_simulation"
+    };
+  }
+
+  if (config.expressionType === "bull_call_debit_spread" && secondary) {
+    const debit = roundMoney(Math.max(0.01, (primaryPrice - secondaryPrice) * multiplier));
+    const width = (secondary.strikePrice - primary.strikePrice) * multiplier;
+    return {
+      expressionType: config.expressionType,
+      underlyingSymbol: proposal.symbol,
+      legs,
+      estimatedDebit: debit,
+      maxLoss: debit,
+      maxProfit: roundMoney(Math.max(0, width - debit)),
+      breakeven: roundMoney(primary.strikePrice + debit / multiplier),
+      requiredCapital: debit,
+      paperExecutionMode: "internal_simulation"
+    };
+  }
+
+  if (config.expressionType === "bear_put_debit_spread" && secondary) {
+    const debit = roundMoney(Math.max(0.01, (primaryPrice - secondaryPrice) * multiplier));
+    const width = (primary.strikePrice - secondary.strikePrice) * multiplier;
+    return {
+      expressionType: config.expressionType,
+      underlyingSymbol: proposal.symbol,
+      legs,
+      estimatedDebit: debit,
+      maxLoss: debit,
+      maxProfit: roundMoney(Math.max(0, width - debit)),
+      breakeven: roundMoney(primary.strikePrice - debit / multiplier),
+      requiredCapital: debit,
+      paperExecutionMode: "internal_simulation"
+    };
+  }
+
+  if (config.expressionType === "covered_call") {
+    const credit = roundMoney(Math.max(0, primaryPrice * multiplier));
+    const requiredCapital = roundMoney(proposal.requiredCapital ?? primary.strikePrice * multiplier);
+    return {
+      expressionType: config.expressionType,
+      underlyingSymbol: proposal.symbol,
+      legs,
+      estimatedCredit: credit,
+      maxLoss: roundMoney(Math.max(0.01, requiredCapital - credit)),
+      maxProfit: credit,
+      breakeven: roundMoney(Math.max(0.01, requiredCapital / multiplier - primaryPrice)),
+      requiredCapital,
+      paperExecutionMode: "internal_simulation"
+    };
+  }
+
+  if (config.expressionType === "cash_secured_put") {
+    const credit = roundMoney(Math.max(0, primaryPrice * multiplier));
+    const requiredCapital = roundMoney(primary.strikePrice * multiplier);
+    return {
+      expressionType: config.expressionType,
+      underlyingSymbol: proposal.symbol,
+      legs,
+      estimatedCredit: credit,
+      maxLoss: roundMoney(Math.max(0.01, requiredCapital - credit)),
+      maxProfit: credit,
+      breakeven: roundMoney(Math.max(0.01, primary.strikePrice - primaryPrice)),
+      requiredCapital,
+      paperExecutionMode: "internal_simulation"
+    };
+  }
+
+  return null;
+}
+
+function optionIdeaToLeg(option: OptionIdea, side: "buy" | "sell"): OptionLeg {
+  const mid = getOptionUnitPrice(option);
+  return {
+    optionSymbol: option.symbol,
+    underlyingSymbol: option.underlyingSymbol,
+    optionType: option.type,
+    side,
+    quantity: 1,
+    strike: option.strikePrice,
+    expiration: option.expirationDate,
+    estimatedMid: mid ?? undefined,
+    bid: option.bidPrice ?? undefined,
+    ask: option.askPrice ?? undefined,
+    last: option.lastPrice ?? option.closePrice ?? undefined,
+    delta: option.delta ?? undefined,
+    theta: option.theta ?? undefined,
+    vega: option.vega ?? undefined,
+    impliedVolatility: option.impliedVolatility ?? undefined,
+    openInterest: option.openInterest,
+    volume: option.volume,
+    liquidityScore: option.liquidityScore ?? null
+  };
+}
+
+function getOptionUnitPrice(option: OptionIdea): number | null {
+  if (typeof option.midPrice === "number" && Number.isFinite(option.midPrice) && option.midPrice > 0) return option.midPrice;
+  if (typeof option.bidPrice === "number" && typeof option.askPrice === "number" && option.bidPrice >= 0 && option.askPrice > 0) {
+    return roundMoney((option.bidPrice + option.askPrice) / 2);
+  }
+  if (typeof option.lastPrice === "number" && Number.isFinite(option.lastPrice) && option.lastPrice > 0) return option.lastPrice;
+  if (typeof option.closePrice === "number" && Number.isFinite(option.closePrice) && option.closePrice > 0) return option.closePrice;
+  return null;
+}
+
+function getOptionSpreadPct(option: OptionIdea): number | null {
+  if (typeof option.bidPrice !== "number" || typeof option.askPrice !== "number" || option.bidPrice <= 0 || option.askPrice <= option.bidPrice) return null;
+  const mid = (option.bidPrice + option.askPrice) / 2;
+  return mid > 0 ? (option.askPrice - option.bidPrice) / mid : null;
+}
+
+function getSelectorWarnings(
+  config: ContractSelectorConfig | null,
+  primary: OptionIdea | null,
+  secondary: OptionIdea | null,
+  order: MultiLegPaperOrder | null,
+  optionCount: number
+): string[] {
+  if (!config) return ["This proposal does not map to a supported options expression."];
+  if (!optionCount) return ["No option contracts are loaded for this ticker. Refresh options data before selecting contracts."];
+  const warnings: string[] = [];
+  if (!primary) warnings.push("No contract selected.");
+  if (config.secondary && !secondary) warnings.push("Select both compatible spread legs.");
+  for (const option of [primary, secondary].filter(Boolean) as OptionIdea[]) {
+    if ((option.daysToExpiration ?? 0) <= 0) warnings.push(`${option.symbol} is 0DTE or expired; validation will block it by default.`);
+    if (getOptionUnitPrice(option) === null) warnings.push(`${option.symbol} is missing bid/ask, mid, or last pricing.`);
+    if (option.openInterest === null || option.openInterest === undefined) warnings.push(`${option.symbol} is missing open interest.`);
+    if ((option.openInterest ?? 0) > 0 && (option.openInterest ?? 0) < 100) warnings.push(`${option.symbol} has low open interest.`);
+    const spreadPct = getOptionSpreadPct(option);
+    if (spreadPct !== null && spreadPct > 0.2) warnings.push(`${option.symbol} has a wide bid/ask spread.`);
+  }
+  if (order?.legs.some((leg) => leg.side === "sell")) warnings.push("Short option legs carry assignment risk; validation still blocks naked/undefined-risk structures.");
+  if (order?.paperExecutionMode === "internal_simulation") warnings.push("This will validate for internal simulation only, not broker options submission.");
+  return [...new Set(warnings)].slice(0, 6);
+}
+
+function formatContractOptionLabel(option: OptionIdea): string {
+  return [
+    option.symbol,
+    option.expirationDate,
+    `${formatCurrency(option.strikePrice)} ${option.type}`,
+    `${formatDte(option.daysToExpiration)} DTE`,
+    `mid ${formatOptionalCurrency(getOptionUnitPrice(option))}`,
+    `OI ${option.openInterest ?? "--"}`,
+    `vol ${option.volume ?? "--"}`
+  ].join(" / ");
+}
+
+function roundMoney(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 function filterJournalEntries(journal: TradeJournalEntry[], filter: JournalFilter): TradeJournalEntry[] {

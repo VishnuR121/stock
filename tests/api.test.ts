@@ -1050,6 +1050,196 @@ describe("API safety behavior", () => {
     expect(snapshotRequests).toBe(1);
   });
 
+  it("validates selected Algo option contracts into internal-simulation eligibility", async () => {
+    const expiration = futureDateKey(45);
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes("/v2/account")) {
+        return jsonResponse({
+          equity: "100000",
+          cash: "100000",
+          buying_power: "100000",
+          portfolio_value: "100000",
+          status: "ACTIVE",
+          currency: "USD"
+        });
+      }
+      if (target.includes("/v2/positions") || target.includes("/v2/orders")) {
+        return jsonResponse([]);
+      }
+      if (target.includes("/v2/options/contracts")) {
+        return jsonResponse({
+          option_contracts: [
+            {
+              symbol: "AAPL260619C00155000",
+              underlying_symbol: "AAPL",
+              type: "call",
+              expiration_date: expiration,
+              strike_price: "155",
+              close_price: "4.50",
+              bid_price: "4.40",
+              ask_price: "4.60",
+              open_interest: "500",
+              volume: "120"
+            }
+          ]
+        });
+      }
+      if (target.includes("/v2/stocks/")) {
+        return jsonResponse({ bars: makeBars().slice(-260) });
+      }
+      return jsonResponse({});
+    });
+
+    const app = createApp({
+      alpacaKeyId: "key",
+      alpacaSecretKey: "secret",
+      aiProvider: "openai",
+      openAiApiKey: undefined,
+      anthropicApiKey: undefined,
+      databaseUrl: undefined,
+      dataFilePath: `data/test-algo-contract-select-${Date.now()}.json`
+    });
+
+    const created = await request(app)
+      .post("/api/algo/proposals")
+      .send({ snapshot: makeSignalSnapshot(), mode: "fast" });
+    if (created.status !== 200) throw new Error(JSON.stringify(created.body));
+    const proposal = created.body.proposals.find((item: { strategyKind: string }) => item.strategyKind === "long_call");
+    expect(proposal).toBeTruthy();
+
+    const response = await request(app)
+      .post(`/api/algo/proposals/${proposal.id}/select-contracts`)
+      .send({
+        multiLegOrder: {
+          expressionType: "long_call",
+          underlyingSymbol: "AAPL",
+          legs: [
+            {
+              optionSymbol: "AAPL260619C00155000",
+              underlyingSymbol: "AAPL",
+              optionType: "call",
+              side: "buy",
+              quantity: 1,
+              strike: 155,
+              expiration,
+              estimatedMid: 4.5,
+              bid: 4.4,
+              ask: 4.6,
+              openInterest: 500,
+              volume: 120,
+              liquidityScore: 90
+            }
+          ],
+          estimatedDebit: 450,
+          maxLoss: 450,
+          breakeven: 159.5,
+          requiredCapital: 450,
+          paperExecutionMode: "internal_simulation"
+        }
+      })
+      .expect(200);
+
+    expect(response.body.proposal.workflowStatus).toBe("paper_eligible");
+    expect(response.body.proposal.executionType).toBe("internal_options_simulation");
+    expect(response.body.proposal.selectedContracts[0].optionSymbol).toBe("AAPL260619C00155000");
+    expect(response.body.proposal.paperExecutionMode).toBe("internal_simulation");
+  });
+
+  it("keeps Algo option proposals blocked when selected contracts fail validation", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes("/v2/account")) {
+        return jsonResponse({
+          equity: "100000",
+          cash: "100000",
+          buying_power: "100000",
+          portfolio_value: "100000",
+          status: "ACTIVE",
+          currency: "USD"
+        });
+      }
+      if (target.includes("/v2/positions") || target.includes("/v2/orders")) {
+        return jsonResponse([]);
+      }
+      if (target.includes("/v2/options/contracts")) {
+        return jsonResponse({
+          option_contracts: [
+            {
+              symbol: "AAPL0DTEC00155000",
+              underlying_symbol: "AAPL",
+              type: "call",
+              expiration_date: today,
+              strike_price: "155",
+              close_price: "4.50",
+              bid_price: "4.40",
+              ask_price: "4.60",
+              open_interest: "500",
+              volume: "120"
+            }
+          ]
+        });
+      }
+      if (target.includes("/v2/stocks/")) {
+        return jsonResponse({ bars: makeBars().slice(-260) });
+      }
+      return jsonResponse({});
+    });
+
+    const app = createApp({
+      alpacaKeyId: "key",
+      alpacaSecretKey: "secret",
+      aiProvider: "openai",
+      openAiApiKey: undefined,
+      anthropicApiKey: undefined,
+      databaseUrl: undefined,
+      dataFilePath: `data/test-algo-contract-block-${Date.now()}.json`
+    });
+
+    const created = await request(app)
+      .post("/api/algo/proposals")
+      .send({ snapshot: makeSignalSnapshot(), mode: "fast" });
+    if (created.status !== 200) throw new Error(JSON.stringify(created.body));
+    const proposal = created.body.proposals.find((item: { strategyKind: string }) => item.strategyKind === "long_call");
+    expect(proposal).toBeTruthy();
+
+    const response = await request(app)
+      .post(`/api/algo/proposals/${proposal.id}/select-contracts`)
+      .send({
+        multiLegOrder: {
+          expressionType: "long_call",
+          underlyingSymbol: "AAPL",
+          legs: [
+            {
+              optionSymbol: "AAPL0DTEC00155000",
+              underlyingSymbol: "AAPL",
+              optionType: "call",
+              side: "buy",
+              quantity: 1,
+              strike: 155,
+              expiration: today,
+              estimatedMid: 4.5,
+              bid: 4.4,
+              ask: 4.6,
+              openInterest: 500,
+              volume: 120
+            }
+          ],
+          estimatedDebit: 450,
+          maxLoss: 450,
+          breakeven: 159.5,
+          requiredCapital: 450,
+          paperExecutionMode: "internal_simulation"
+        }
+      })
+      .expect(200);
+
+    expect(response.body.proposal.workflowStatus).toBe("blocked");
+    expect(response.body.proposal.executable).toBe(false);
+    expect(response.body.proposal.blockedReasons.join(" ")).toMatch(/0DTE/);
+  });
+
   it("reuses cached option ideas to reduce repeated option chain calls", async () => {
     let optionRequests = 0;
     let barRequests = 0;
@@ -1119,6 +1309,12 @@ function makeBars(count = 260) {
       v: 1000000 + index * 1000
     };
   });
+}
+
+function futureDateKey(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 function makeSignalSnapshot(): SignalSnapshot {
