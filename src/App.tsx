@@ -2248,6 +2248,7 @@ function AlgoCommandCenter({
                 <em>{formatAlgoWorkflowStatus(proposal)}</em>
               </div>
               <p>{proposal.summary}</p>
+              <AlgoProposalReasoning proposal={proposal} />
               <div className="strategyStats">
                 <span>Score {proposal.score}</span>
                 <span>{proposal.executable ? `Paper eligible ${formatHorizon(proposal.horizon ?? "intraday")}` : formatAlgoWorkflowStatus(proposal)}</span>
@@ -2332,6 +2333,33 @@ function AlgoCommandCenter({
   );
 }
 
+function AlgoProposalReasoning({ proposal }: { proposal: AlgoTradeProposal }) {
+  const setup = uniqueStrings(proposal.setup);
+  const risks = uniqueStrings(proposal.riskNotes);
+  if (!setup.length && !risks.length) return null;
+
+  return (
+    <div className="algoReasoning" aria-label={`${proposal.symbol} proposal reasoning`}>
+      {setup.length > 0 && (
+        <div>
+          <span>Thesis</span>
+          <ul>
+            {setup.slice(0, 3).map((item) => <li key={item}>{item}</li>)}
+          </ul>
+        </div>
+      )}
+      {risks.length > 0 && (
+        <div>
+          <span>Risk notes</span>
+          <ul>
+            {risks.slice(0, 3).map((item) => <li key={item}>{item}</li>)}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AlgoProposalDecisionDetails({ proposal }: { proposal: AlgoTradeProposal }) {
   const blockedReasons = uniqueStrings(proposal.blockedReasons);
   const fixes = uniqueStrings(proposal.howToFix);
@@ -2399,8 +2427,16 @@ function getProposalSearchText(proposal: AlgoTradeProposal) {
     proposal.strategyKind,
     proposal.direction,
     proposal.status,
+    proposal.workflowStatus,
+    proposal.expressionType,
     proposal.summary,
-    proposal.optionOrder?.contractSymbol
+    proposal.optionOrder?.contractSymbol,
+    ...(proposal.setup ?? []),
+    ...(proposal.riskNotes ?? []),
+    ...(proposal.blockedReasons ?? []),
+    ...(proposal.howToFix ?? []),
+    ...(proposal.warnings ?? []),
+    ...(proposal.selectedContracts ?? []).map((leg) => leg.optionSymbol)
   ].filter(Boolean).join(" ").toLowerCase();
 }
 

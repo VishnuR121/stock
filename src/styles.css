@@ -1064,6 +1064,7 @@ h3 {
   margin: 0;
 }
 
+.algoReasoning,
 .algoDecisionDetails {
   display: grid;
   gap: 8px;
@@ -1073,11 +1074,17 @@ h3 {
   background: var(--surface);
 }
 
+.algoReasoning {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.algoReasoning div,
 .algoDecisionDetails div {
   display: grid;
   gap: 4px;
 }
 
+.algoReasoning span,
 .algoDecisionDetails span {
   color: var(--text-muted);
   font-size: 0.7rem;
@@ -1085,6 +1092,7 @@ h3 {
   text-transform: uppercase;
 }
 
+.algoReasoning ul,
 .algoDecisionDetails ul {
   display: grid;
   gap: 3px;
@@ -1093,6 +1101,11 @@ h3 {
   color: var(--text-muted);
   font-size: 0.78rem;
   font-weight: 750;
+}
+
+.algoReasoning li,
+.algoDecisionDetails li {
+  overflow-wrap: anywhere;
 }
 
 .algoDecisionDetails p {
@@ -2817,6 +2830,10 @@ th {
   .journalAnalytics,
   .journalReviewForm,
   .reviewList {
+    grid-template-columns: 1fr;
+  }
+
+  .algoReasoning {
     grid-template-columns: 1fr;
   }
 

@@ -272,8 +272,16 @@ describe("dashboard", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Algo$/i }));
 
     expect(await screen.findByText("6 saved")).toBeInTheDocument();
+    expect(screen.getAllByText("Thesis").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Price is above rising moving averages.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Risk notes").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Gap risk remains paper-only.").length).toBeGreaterThan(0);
     expect(screen.getByText("4 queued")).toBeInTheDocument();
     expect(screen.getByText("4 shown")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Search algo proposals"), { target: { value: "gap risk" } });
+    expect(screen.getByText("4 shown")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search algo proposals"), { target: { value: "" } });
 
     fireEvent.click(screen.getByRole("button", { name: /^All$/i }));
     expect(screen.getByText("6 shown")).toBeInTheDocument();
@@ -552,8 +560,8 @@ function makeAlgoProposals(): AlgoTradeProposal[] {
     executable: true,
     score: 90 - index,
     summary: "Test proposal",
-    setup: [],
-    riskNotes: [],
+    setup: ["Price is above rising moving averages."],
+    riskNotes: ["Gap risk remains paper-only."],
     warnings: ["Regime filter used SPY and QQQ history."],
     order: {
       symbol: "XLI",
