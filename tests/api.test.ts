@@ -1144,6 +1144,29 @@ describe("API safety behavior", () => {
     expect(response.body.proposal.executionType).toBe("internal_options_simulation");
     expect(response.body.proposal.selectedContracts[0].optionSymbol).toBe("AAPL260619C00155000");
     expect(response.body.proposal.paperExecutionMode).toBe("internal_simulation");
+
+    const missingOptionAcknowledgements = await request(app)
+      .post(`/api/algo/proposals/${proposal.id}/execute`)
+      .send({
+        earningsChecked: true,
+        confirmedPaperOnly: true,
+        acceptedRisk: true
+      })
+      .expect(400);
+    expect(missingOptionAcknowledgements.body.error).toMatch(/max loss, internal simulation, and no-live-endpoint/i);
+
+    const executed = await request(app)
+      .post(`/api/algo/proposals/${proposal.id}/execute`)
+      .send({
+        earningsChecked: true,
+        confirmedPaperOnly: true,
+        acceptedRisk: true,
+        maxLossAcknowledged: true,
+        paperSimulationAcknowledged: true,
+        noLiveEndpointAcknowledged: true
+      })
+      .expect(200);
+    expect(executed.body.proposal.workflowStatus).toBe("internally_simulated");
   });
 
   it("keeps Algo option proposals blocked when selected contracts fail validation", async () => {

@@ -559,6 +559,13 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       response.status(400).json({ error: "Confirm earnings/event timing, paper-only execution, and accepted risk before placing." });
       return;
     }
+    if (
+      proposal.executionType === "internal_options_simulation"
+      && (!request.body?.maxLossAcknowledged || !request.body?.paperSimulationAcknowledged || !request.body?.noLiveEndpointAcknowledged)
+    ) {
+      response.status(400).json({ error: "Confirm max loss, internal simulation, and no-live-endpoint acknowledgements before creating an options paper simulation." });
+      return;
+    }
 
     const riskSettings = await store.getRiskSettings();
     if (riskSettings.killSwitchEnabled) {
@@ -604,12 +611,12 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       const order: MultiLegPaperOrderRequest = {
         ...proposal.multiLegOrder,
         timeHorizon: proposal.horizon === "options_short_term" ? "30-60 DTE options proposal" : proposal.expectedHoldingPeriod,
-        earningsChecked: true,
-        confirmedPaperOnly: true,
-        acceptedRisk: true,
-        maxLossAcknowledged: true,
-        paperSimulationAcknowledged: true,
-        noLiveEndpointAcknowledged: true,
+        earningsChecked: request.body.earningsChecked === true,
+        confirmedPaperOnly: request.body.confirmedPaperOnly === true,
+        acceptedRisk: request.body.acceptedRisk === true,
+        maxLossAcknowledged: request.body.maxLossAcknowledged === true,
+        paperSimulationAcknowledged: request.body.paperSimulationAcknowledged === true,
+        noLiveEndpointAcknowledged: request.body.noLiveEndpointAcknowledged === true,
         sourceAnalysisId: proposal.sourceAnalysisId,
         followedPlan: true
       };

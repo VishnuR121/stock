@@ -2627,6 +2627,10 @@ th {
   width: min(680px, 100%);
 }
 
+.modal.algoExecutionModal {
+  width: min(620px, 100%);
+}
+
 .modal.contractSelectorModal {
   width: min(860px, 100%);
   max-height: calc(100vh - 48px);

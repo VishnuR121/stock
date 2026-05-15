@@ -137,6 +137,21 @@ describe("dashboard", () => {
         algoProposals = algoProposals.filter((proposal) => proposal.id !== id);
         return jsonResponse({ id });
       }
+      if (target.includes("/api/algo/proposals/") && target.endsWith("/execute") && init?.method === "POST") {
+        const id = target.split("/api/algo/proposals/")[1].replace("/execute", "");
+        const confirmations = JSON.parse(String(init.body ?? "{}"));
+        const proposal = algoProposals.find((item) => item.id === id);
+        if (!confirmations.earningsChecked || !confirmations.confirmedPaperOnly || !confirmations.acceptedRisk) {
+          return jsonResponse({ error: "Confirm earnings/event timing, paper-only execution, and accepted risk before placing." }, 400);
+        }
+        const updated = {
+          ...proposal,
+          status: "placed" as const,
+          workflowStatus: proposal?.executionType === "internal_options_simulation" ? "internally_simulated" as const : "paper_submitted" as const
+        } as AlgoTradeProposal;
+        algoProposals = algoProposals.map((item) => item.id === id ? updated : item);
+        return jsonResponse({ proposal: updated });
+      }
       if (target.endsWith("/api/journal")) {
         return jsonResponse(journalEntries);
       }
@@ -281,6 +296,26 @@ describe("dashboard", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Change contracts$/i }));
     expect(await screen.findByRole("dialog", { name: /Select Algo option contracts/i })).toBeInTheDocument();
     expect(screen.getByText("No option contracts are loaded for this ticker. Refresh options data before selecting contracts.")).toBeInTheDocument();
+  });
+
+  it("requires explicit Algo paper execution confirmations", async () => {
+    render(<App />);
+
+    await screen.findAllByText("SPY");
+    fireEvent.click(screen.getByRole("button", { name: /^Algo$/i }));
+    fireEvent.click((await screen.findAllByRole("button", { name: /^Approve \+ place$/i }))[0]);
+
+    expect(await screen.findByRole("dialog", { name: /Confirm Algo paper execution/i })).toBeInTheDocument();
+    const submit = screen.getByRole("button", { name: /^Submit broker paper order$/i });
+    expect(submit).toBeDisabled();
+
+    fireEvent.click(screen.getByLabelText("Paper-only execution"));
+    fireEvent.click(screen.getByLabelText("Earnings/event timing checked"));
+    fireEvent.click(screen.getByLabelText("Risk accepted"));
+    expect(submit).not.toBeDisabled();
+    fireEvent.click(submit);
+
+    expect(await screen.findByText(/paper order placed from approved algo proposal/i)).toBeInTheDocument();
   });
 
   it("can delete algo proposals and journal entries from the dashboard", async () => {

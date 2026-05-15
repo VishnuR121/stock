@@ -105,6 +105,14 @@ type BacktestForm = {
   minScore: number;
   marketRegimeFilter: MarketRegimeLabel[];
 };
+type AlgoExecutionConfirmations = {
+  earningsChecked: boolean;
+  confirmedPaperOnly: boolean;
+  acceptedRisk: boolean;
+  maxLossAcknowledged: boolean;
+  paperSimulationAcknowledged: boolean;
+  noLiveEndpointAcknowledged: boolean;
+};
 
 const emptyOrder: PaperOrderRequest = {
   symbol: "",
@@ -155,6 +163,7 @@ export function App() {
   const [orderDraft, setOrderDraft] = useState<PaperOrderRequest>(emptyOrder);
   const [optionOrderDraft, setOptionOrderDraft] = useState<MultiLegPaperOrderRequest | null>(null);
   const [contractSelectorProposal, setContractSelectorProposal] = useState<AlgoTradeProposal | null>(null);
+  const [algoExecutionReview, setAlgoExecutionReview] = useState<AlgoTradeProposal | null>(null);
   const [reviewingOrder, setReviewingOrder] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -622,19 +631,21 @@ export function App() {
     }
   }
 
-  async function executeAlgoProposal(proposal: AlgoTradeProposal) {
+  function openAlgoExecutionReview(proposal: AlgoTradeProposal) {
+    setMessage(null);
+    setAlgoExecutionReview(proposal);
+  }
+
+  async function executeAlgoProposal(proposal: AlgoTradeProposal, confirmations: AlgoExecutionConfirmations) {
     setBusy(`algo-execute-${proposal.id}`);
     setMessage(null);
     try {
       const result = await api<{ proposal: AlgoTradeProposal }>(`/api/algo/proposals/${proposal.id}/execute`, {
         method: "POST",
-        body: JSON.stringify({
-          earningsChecked: true,
-          confirmedPaperOnly: true,
-          acceptedRisk: true
-        })
+        body: JSON.stringify(confirmations)
       });
       setAlgoProposals((current) => current.map((item) => item.id === proposal.id ? result.proposal : item));
+      setAlgoExecutionReview(null);
       setMessage(result.proposal.workflowStatus === "internally_simulated"
         ? `${proposal.symbol} options paper simulation created from approved algo proposal.`
         : `${proposal.symbol} paper order placed from approved algo proposal.`);
@@ -1413,7 +1424,7 @@ export function App() {
                 onFilterChange={setAlgoQueueFilter}
                 onSearchChange={setAlgoSearch}
                 onGenerate={generateAlgoProposals}
-                onExecute={executeAlgoProposal}
+                onExecute={openAlgoExecutionReview}
                 onReject={rejectAlgoProposal}
                 onDelete={deleteAlgoProposal}
                 onSelectContracts={openAlgoContractSelector}
@@ -1544,6 +1555,16 @@ export function App() {
           busy={busy === `algo-select-${contractSelectorProposal.id}`}
           onClose={() => setContractSelectorProposal(null)}
           onSubmit={(order) => selectAlgoContracts(contractSelectorProposal, order)}
+        />
+      )}
+
+      {algoExecutionReview && (
+        <AlgoExecutionReviewModal
+          proposal={algoExecutionReview}
+          busy={busy === `algo-execute-${algoExecutionReview.id}`}
+          killSwitchEnabled={riskSettings?.killSwitchEnabled === true}
+          onClose={() => setAlgoExecutionReview(null)}
+          onSubmit={(confirmations) => executeAlgoProposal(algoExecutionReview, confirmations)}
         />
       )}
     </main>
@@ -3276,6 +3297,130 @@ function ContractSelectorLegCard({ option }: { option: OptionIdea }) {
         <span>Delta {formatNumber(option.delta)}</span>
       </div>
     </article>
+  );
+}
+
+function AlgoExecutionReviewModal({
+  proposal,
+  busy,
+  killSwitchEnabled,
+  onClose,
+  onSubmit
+}: {
+  proposal: AlgoTradeProposal;
+  busy: boolean;
+  killSwitchEnabled: boolean;
+  onClose: () => void;
+  onSubmit: (confirmations: AlgoExecutionConfirmations) => void;
+}) {
+  const isOptions = proposal.executionType === "internal_options_simulation";
+  const [confirmations, setConfirmations] = useState<AlgoExecutionConfirmations>({
+    earningsChecked: false,
+    confirmedPaperOnly: false,
+    acceptedRisk: false,
+    maxLossAcknowledged: false,
+    paperSimulationAcknowledged: false,
+    noLiveEndpointAcknowledged: false
+  });
+  const update = (patch: Partial<AlgoExecutionConfirmations>) => setConfirmations((current) => ({ ...current, ...patch }));
+  const baseOk = confirmations.earningsChecked && confirmations.confirmedPaperOnly && confirmations.acceptedRisk;
+  const optionsOk = !isOptions || (confirmations.maxLossAcknowledged && confirmations.paperSimulationAcknowledged && confirmations.noLiveEndpointAcknowledged);
+  const canSubmit = baseOk && optionsOk && !killSwitchEnabled && proposal.executable && proposal.status === "queued";
+
+  return (
+    <div className="modalOverlay" role="presentation">
+      <section className="modal algoExecutionModal" role="dialog" aria-modal="true" aria-label="Confirm Algo paper execution">
+        <div className="panelTitle spaced">
+          <div>
+            <h2>Confirm Algo paper order</h2>
+            <p>{proposal.symbol} / {proposal.strategyTitle}</p>
+          </div>
+          <button className="iconButton" onClick={onClose} aria-label="Close Algo execution review">
+            x
+          </button>
+        </div>
+
+        <dl className="reviewList">
+          <div>
+            <dt>Status</dt>
+            <dd>{formatAlgoWorkflowStatus(proposal)}</dd>
+          </div>
+          <div>
+            <dt>Mode</dt>
+            <dd>{formatPaperMode(proposal.paperExecutionMode ?? (isOptions ? "internal_simulation" : "broker_paper"))}</dd>
+          </div>
+          <div>
+            <dt>Capital</dt>
+            <dd>{formatOptionalCurrency(proposal.requiredCapital ?? null)}</dd>
+          </div>
+          <div>
+            <dt>Max loss</dt>
+            <dd>{formatOptionalCurrency(proposal.maxLoss ?? null)}</dd>
+          </div>
+          <div>
+            <dt>Max profit</dt>
+            <dd>{formatOptionalCurrency(proposal.maxProfit ?? null)}</dd>
+          </div>
+          <div>
+            <dt>Breakeven</dt>
+            <dd>{formatOptionalCurrency(proposal.breakeven ?? null)}</dd>
+          </div>
+        </dl>
+
+        {proposal.selectedContracts?.length ? (
+          <div className="optionLegList compact">
+            {proposal.selectedContracts.map((leg) => (
+              <span key={`${proposal.id}-review-${leg.optionSymbol}-${leg.side}`}>
+                {leg.side.toUpperCase()} {leg.quantity} {leg.optionType} {leg.strike} {leg.expiration}
+              </span>
+            ))}
+          </div>
+        ) : proposal.order ? (
+          <div className="optionLegList compact">
+            <span>{proposal.order.side === "sell" ? "SHORT" : "BUY"} {proposal.order.quantity ?? "--"} shares</span>
+            <span>Stop {formatCurrency(proposal.order.stopLossPrice)}</span>
+            <span>Target {formatCurrency(proposal.order.takeProfitPrice)}</span>
+          </div>
+        ) : null}
+
+        {killSwitchEnabled && <p className="realismNotice danger">Kill switch is enabled.</p>}
+        <div className="checkboxStack">
+          <label>
+            <input type="checkbox" checked={confirmations.confirmedPaperOnly} onChange={(event) => update({ confirmedPaperOnly: event.target.checked })} />
+            <span>Paper-only execution</span>
+          </label>
+          <label>
+            <input type="checkbox" checked={confirmations.earningsChecked} onChange={(event) => update({ earningsChecked: event.target.checked })} />
+            <span>Earnings/event timing checked</span>
+          </label>
+          <label>
+            <input type="checkbox" checked={confirmations.acceptedRisk} onChange={(event) => update({ acceptedRisk: event.target.checked })} />
+            <span>Risk accepted</span>
+          </label>
+          {isOptions && (
+            <>
+              <label>
+                <input type="checkbox" checked={confirmations.maxLossAcknowledged} onChange={(event) => update({ maxLossAcknowledged: event.target.checked })} />
+                <span>Max loss acknowledged</span>
+              </label>
+              <label>
+                <input type="checkbox" checked={confirmations.paperSimulationAcknowledged} onChange={(event) => update({ paperSimulationAcknowledged: event.target.checked })} />
+                <span>Internal simulation acknowledged</span>
+              </label>
+              <label>
+                <input type="checkbox" checked={confirmations.noLiveEndpointAcknowledged} onChange={(event) => update({ noLiveEndpointAcknowledged: event.target.checked })} />
+                <span>No live endpoint</span>
+              </label>
+            </>
+          )}
+        </div>
+
+        <button className="wideButton danger" onClick={() => onSubmit(confirmations)} disabled={busy || !canSubmit}>
+          {busy ? <Loader2 className="spin" size={17} /> : <CheckCircle2 size={17} />}
+          <span>{isOptions ? "Create internal simulation" : "Submit broker paper order"}</span>
+        </button>
+      </section>
+    </div>
   );
 }
 
