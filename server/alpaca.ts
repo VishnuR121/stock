@@ -1,4 +1,4 @@
-import type { Bar, BrokerAccountSnapshot, PaperOrderRequest } from "../src/shared/types";
+import type { Bar, BrokerAccountSnapshot, BrokerAssetSnapshot, PaperOrderRequest } from "../src/shared/types";
 import { isPaperAlpacaUrl, type AppConfig } from "./config";
 import { mapOptionContractsToIdeas } from "./options";
 
@@ -19,6 +19,20 @@ interface AlpacaAccount {
   cash?: string;
   buying_power?: string;
   portfolio_value?: string;
+}
+
+interface AlpacaAsset {
+  id?: string;
+  class?: string;
+  exchange?: string;
+  symbol?: string;
+  name?: string;
+  status?: string;
+  tradable?: boolean;
+  marginable?: boolean;
+  shortable?: boolean;
+  easy_to_borrow?: boolean;
+  fractionable?: boolean;
 }
 
 interface GetBarsOptions {
@@ -65,6 +79,23 @@ export class AlpacaClient {
 
   async getOrders(): Promise<unknown[]> {
     return this.tradingRequest<unknown[]>("/v2/orders?status=all&limit=50&nested=true");
+  }
+
+  async getAsset(symbol: string): Promise<BrokerAssetSnapshot> {
+    const asset = await this.tradingRequest<AlpacaAsset>(`/v2/assets/${encodeURIComponent(symbol)}`);
+    return {
+      id: asset.id,
+      symbol: String(asset.symbol ?? symbol).toUpperCase(),
+      name: asset.name,
+      assetClass: asset.class,
+      exchange: asset.exchange,
+      status: asset.status,
+      tradable: asset.tradable,
+      marginable: asset.marginable,
+      shortable: asset.shortable,
+      easyToBorrow: asset.easy_to_borrow,
+      fractionable: asset.fractionable
+    };
   }
 
   async getBars(symbol: string, input: number | GetBarsOptions = 260): Promise<Bar[]> {

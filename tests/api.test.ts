@@ -266,6 +266,131 @@ describe("API safety behavior", () => {
     expect(journal.body[0].notes).toMatch(/Broker order broker-order-1/);
   });
 
+  it("requires easy-to-borrow Alpaca asset data before short equity paper orders", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const target = String(url);
+      if (target.includes("/v2/account")) {
+        return jsonResponse({
+          equity: "100000",
+          cash: "100000",
+          buying_power: "200000",
+          portfolio_value: "100000",
+          status: "ACTIVE",
+          currency: "USD"
+        });
+      }
+      if (target.includes("/v2/assets/TSLA")) {
+        return jsonResponse({
+          symbol: "TSLA",
+          status: "active",
+          tradable: true,
+          shortable: true,
+          easy_to_borrow: false
+        });
+      }
+      if (target.includes("/v2/stocks/TSLA/bars")) {
+        return jsonResponse({
+          bars: [
+            { t: "2026-01-01T00:00:00Z", o: 100, h: 101, l: 99, c: 100, v: 1000000 }
+          ]
+        });
+      }
+      if (target.includes("/v2/orders") && init?.method === "POST") return jsonResponse({ id: "should-not-place" });
+      return jsonResponse({});
+    });
+
+    const app = createApp({
+      alpacaKeyId: "key",
+      alpacaSecretKey: "secret",
+      databaseUrl: undefined,
+      dataFilePath: `data/test-shortability-block-${Date.now()}.json`
+    });
+
+    const response = await request(app)
+      .post("/api/alpaca/paper-orders")
+      .send({
+        symbol: "TSLA",
+        side: "sell",
+        orderType: "market",
+        quantity: 2,
+        stopLossPrice: 105,
+        takeProfitPrice: 90,
+        timeInForce: "gtc",
+        horizon: "swing",
+        earningsChecked: true,
+        confirmedPaperOnly: true,
+        acceptedRisk: true
+      })
+      .expect(400);
+
+    expect(response.body.errors.join(" ")).toMatch(/hard-to-borrow/i);
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/v2/orders"), expect.objectContaining({ method: "POST" }));
+  });
+
+  it("places short equity paper orders only after shortability is verified", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const target = String(url);
+      if (target.includes("/v2/account")) {
+        return jsonResponse({
+          equity: "100000",
+          cash: "100000",
+          buying_power: "200000",
+          portfolio_value: "100000",
+          status: "ACTIVE",
+          currency: "USD"
+        });
+      }
+      if (target.includes("/v2/assets/SPY")) {
+        return jsonResponse({
+          symbol: "SPY",
+          status: "active",
+          tradable: true,
+          shortable: true,
+          easy_to_borrow: true
+        });
+      }
+      if (target.includes("/v2/stocks/SPY/bars")) {
+        return jsonResponse({
+          bars: [
+            { t: "2026-01-01T00:00:00Z", o: 100, h: 101, l: 99, c: 100, v: 1000000 }
+          ]
+        });
+      }
+      if (target.includes("/v2/orders") && init?.method === "POST") return jsonResponse({ id: "short-order-1", symbol: "SPY" });
+      return jsonResponse({});
+    });
+
+    const app = createApp({
+      alpacaKeyId: "key",
+      alpacaSecretKey: "secret",
+      databaseUrl: undefined,
+      dataFilePath: `data/test-shortability-place-${Date.now()}.json`
+    });
+
+    const response = await request(app)
+      .post("/api/alpaca/paper-orders")
+      .send({
+        symbol: "SPY",
+        side: "sell",
+        orderType: "market",
+        quantity: 2,
+        stopLossPrice: 105,
+        takeProfitPrice: 90,
+        timeInForce: "gtc",
+        horizon: "swing",
+        earningsChecked: true,
+        confirmedPaperOnly: true,
+        acceptedRisk: true
+      })
+      .expect(200);
+
+    expect(response.body.journalEntry).toMatchObject({
+      symbol: "SPY",
+      action: "paper_short_candidate",
+      expressionType: "short_equity"
+    });
+  });
+
   it("creates an internal options paper simulation without broker order submission", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
       const target = String(url);

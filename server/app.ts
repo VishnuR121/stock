@@ -442,8 +442,14 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
         confirmedPaperOnly: true,
         acceptedRisk: true
       };
-      const referencePrice = await getReferencePrice(alpaca, order.symbol);
-      validation = validatePaperOrder(order, riskProfile, referencePrice);
+      const [referencePrice, asset] = await Promise.all([
+        getReferencePrice(alpaca, order.symbol),
+        order.side === "sell" ? getAssetForShortCheck(alpaca, order.symbol) : Promise.resolve(null)
+      ]);
+      validation = validatePaperOrder(order, riskProfile, referencePrice, {
+        asset,
+        requireShortable: order.side === "sell"
+      });
       if (!validation.ok || !validation.order) {
         const updated = await store.updateAlgoTradeProposal(proposal.id, {
           status: "blocked",
@@ -691,8 +697,14 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
     const account = await alpaca.getAccount();
     const riskProfile = getRiskProfile(account.equity ?? 100000, riskSettings);
     const orderInput = parsed.data as PaperOrderRequest;
-    const referencePrice = await getReferencePrice(alpaca, orderInput.symbol);
-    const validation = validatePaperOrder(orderInput, riskProfile, referencePrice);
+    const [referencePrice, asset] = await Promise.all([
+      getReferencePrice(alpaca, orderInput.symbol),
+      orderInput.side === "sell" ? getAssetForShortCheck(alpaca, orderInput.symbol) : Promise.resolve(null)
+    ]);
+    const validation = validatePaperOrder(orderInput, riskProfile, referencePrice, {
+      asset,
+      requireShortable: orderInput.side === "sell"
+    });
 
     if (!validation.ok || !validation.order) {
       response.status(400).json(validation);
@@ -1288,6 +1300,14 @@ function optionalString(value: unknown): string | undefined {
 async function getReferencePrice(alpaca: AlpacaClient, symbol: string): Promise<number | null> {
   const bars = await alpaca.getBars(symbol, 5);
   return bars.at(-1)?.close ?? null;
+}
+
+async function getAssetForShortCheck(alpaca: AlpacaClient, symbol: string) {
+  try {
+    return await alpaca.getAsset(symbol);
+  } catch {
+    return null;
+  }
 }
 
 async function getContextForSymbol(

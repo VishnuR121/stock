@@ -947,6 +947,20 @@ export interface BrokerAccountSnapshot {
   paper: boolean;
 }
 
+export interface BrokerAssetSnapshot {
+  id?: string;
+  symbol: string;
+  name?: string;
+  assetClass?: string;
+  exchange?: string;
+  status?: string;
+  tradable?: boolean;
+  marginable?: boolean;
+  shortable?: boolean;
+  easyToBorrow?: boolean;
+  fractionable?: boolean;
+}
+
 export interface StoredAppData {
   watchlist: WatchlistItem[];
   tradeNotes: Record<string, string>;

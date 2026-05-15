@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { MultiLegPaperOrderRequest, MultiLegPaperOrderValidationResult, PaperOrderRequest, PaperOrderValidationResult, RiskProfile, RiskSettings, TradeExpressionType } from "../src/shared/types";
+import type { BrokerAssetSnapshot, MultiLegPaperOrderRequest, MultiLegPaperOrderValidationResult, PaperOrderRequest, PaperOrderValidationResult, RiskProfile, RiskSettings, TradeExpressionType } from "../src/shared/types";
 import { calculateOrderLevelDistances, checkDayOrderTargetRealism, TRADE_HORIZONS } from "../src/shared/orderHorizon";
 import { round } from "./indicators";
 
@@ -118,7 +118,7 @@ export function validatePaperOrder(
   input: unknown,
   riskProfile: RiskProfile,
   referencePrice?: number | null,
-  options: { now?: Date } = {}
+  options: { now?: Date; asset?: BrokerAssetSnapshot | null; requireShortable?: boolean } = {}
 ): PaperOrderValidationResult & { order?: PaperOrderRequest } {
   const parsed = paperOrderSchema.safeParse(input);
   if (!parsed.success) {
@@ -145,6 +145,9 @@ export function validatePaperOrder(
   if (entryPrice && order.side === "sell" && order.stopLossPrice <= entryPrice) errors.push("Stop loss must be above the estimated entry price for a short order.");
   if (entryPrice && order.side === "sell" && order.takeProfitPrice >= entryPrice) errors.push("Take profit must be below the estimated entry price for a short order.");
   if (order.orderType === "limit" && order.limitPrice && order.limitPrice <= 0) errors.push("Limit price must be positive.");
+  if (order.side === "sell") {
+    errors.push(...getShortabilityErrors(options.asset, options.requireShortable === true));
+  }
 
   const estimatedNotional = getEstimatedNotional(order, entryPrice);
   const estimatedRisk = getEstimatedRisk(order, entryPrice);
@@ -191,6 +194,16 @@ export function validatePaperOrder(
     targetRealism,
     order
   };
+}
+
+function getShortabilityErrors(asset: BrokerAssetSnapshot | null | undefined, required: boolean): string[] {
+  if (!required) return [];
+  if (!asset) return ["Short equity requires a verified Alpaca asset shortability check."];
+  const errors: string[] = [];
+  if (asset.tradable === false) errors.push(`${asset.symbol} is not tradable according to Alpaca asset data.`);
+  if (asset.shortable !== true) errors.push(`${asset.symbol} is not marked shortable by Alpaca.`);
+  if (asset.easyToBorrow === false) errors.push(`${asset.symbol} is not easy-to-borrow according to Alpaca; hard-to-borrow shorts are blocked.`);
+  return errors;
 }
 
 export function validateMultiLegPaperOrder(

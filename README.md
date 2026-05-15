@@ -17,7 +17,7 @@ This is an educational research and paper-trading tool. It is not financial advi
 - Trade Expression Engine that compares long equity, short equity, long calls, long puts, covered calls, cash-secured puts, debit spreads, research-only credit spreads, research-only iron condors, and no-trade.
 - Backtest v1 for long-only stock/ETF swing setups, including SPY benchmark comparison and optional historical market-regime filters.
 - Alpaca paper-only stock/ETF bracket order flow with stop loss, take profit, event check, risk acceptance, paper-only confirmation, validation, and kill switch.
-- Short stock/ETF paper trades when the paper order has a required stop, target, position cap, and max-risk estimate.
+- Short stock/ETF paper trades when the paper order has a required stop, target, position cap, max-risk estimate, and Alpaca shortability/easy-to-borrow verification.
 - Options paper simulation for selected defined-risk or covered/cash-secured strategies: long calls, long puts, bull call debit spreads, bear put debit spreads, covered calls, and cash-secured puts.
 - Internal options simulation monitor with mark-to-market estimates, exposure by strategy/underlying/DTE, exit guidance, and explicit paper-simulation close flow.
 - Paper trade journal, saved plans, analysis runs, equity position monitoring, options simulation monitoring, and journal analytics by expression type, underlying, regime, confidence, DTE bucket, option type, and spread/single-leg structure.
@@ -29,6 +29,7 @@ This is an educational research and paper-trading tool. It is not financial advi
 - Alpaca live trading URLs are rejected server-side.
 - Paper mode is the only execution mode.
 - Paper orders require stop loss, take profit, paper-only confirmation, risk acceptance, and earnings/event confirmation.
+- Short equity paper orders require Alpaca asset data showing the symbol is tradable, shortable, and not hard-to-borrow.
 - Options paper simulations require paper-only confirmation, risk acceptance, event check, max-loss acknowledgement, internal-simulation acknowledgement, no-live-endpoint acknowledgement, liquidity checks, and contract data.
 - Options simulation creation checks open paper journal exposure, max open positions, max options contracts, and same-underlying strategy exposure before a new simulation is created.
 - Closing an options simulation updates only the internal paper journal. It does not submit broker options orders.

@@ -167,6 +167,49 @@ describe("paper order validation", () => {
     expect(result.estimatedRisk).toBe(50);
   });
 
+  it("requires Alpaca shortability data for short paper orders when requested", () => {
+    const baseOrder = {
+      symbol: "SPY",
+      side: "sell",
+      orderType: "market",
+      quantity: 10,
+      stopLossPrice: 105,
+      takeProfitPrice: 90,
+      timeInForce: "gtc",
+      horizon: "swing",
+      earningsChecked: true,
+      confirmedPaperOnly: true,
+      acceptedRisk: true
+    };
+
+    const unverified = validatePaperOrder(baseOrder, riskProfile, 100, { requireShortable: true });
+    expect(unverified.ok).toBe(false);
+    expect(unverified.errors.join(" ")).toMatch(/shortability check/i);
+
+    const hardToBorrow = validatePaperOrder(baseOrder, riskProfile, 100, {
+      requireShortable: true,
+      asset: {
+        symbol: "SPY",
+        tradable: true,
+        shortable: true,
+        easyToBorrow: false
+      }
+    });
+    expect(hardToBorrow.ok).toBe(false);
+    expect(hardToBorrow.errors.join(" ")).toMatch(/hard-to-borrow/i);
+
+    const verified = validatePaperOrder(baseOrder, riskProfile, 100, {
+      requireShortable: true,
+      asset: {
+        symbol: "SPY",
+        tradable: true,
+        shortable: true,
+        easyToBorrow: true
+      }
+    });
+    expect(verified.ok).toBe(true);
+  });
+
   it("validates long call paper simulation max loss and paper-only confirmations", () => {
     const result = validateMultiLegPaperOrder(
       makeOptionOrder({
