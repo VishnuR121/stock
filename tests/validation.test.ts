@@ -247,6 +247,33 @@ describe("paper order validation", () => {
     expect(result.errors.join(" ")).toMatch(/kill switch/);
     expect(result.errors.join(" ")).toMatch(/Live Alpaca/);
   });
+
+  it("blocks options paper simulations that exceed open portfolio caps", () => {
+    const result = validateMultiLegPaperOrder(
+      makeOptionOrder({
+        expressionType: "long_call",
+        legs: [makeLeg({ optionSymbol: "AAPL260619C00145000", optionType: "call", side: "buy", strike: 145 })],
+        estimatedDebit: 450,
+        maxLoss: 450,
+        requiredCapital: 450
+      }),
+      riskProfile,
+      { ...getDefaultRiskSettings(), maxOpenPositions: 2, maxOptionsContracts: 4, maxStrategyExposurePct: 0.1 },
+      {
+        buyingPower: 100000,
+        alpacaPaperOnly: true,
+        now: new Date("2026-05-14T15:00:00Z"),
+        openPaperPositionCount: 2,
+        existingOptionsContracts: 4,
+        existingUnderlyingRequiredCapital: 9900
+      }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toMatch(/max open positions/i);
+    expect(result.errors.join(" ")).toMatch(/max options contract/i);
+    expect(result.errors.join(" ")).toMatch(/AAPL options exposure/i);
+  });
 });
 
 function makeOptionOrder(patch: Record<string, unknown>) {

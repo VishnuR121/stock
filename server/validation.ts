@@ -197,7 +197,14 @@ export function validateMultiLegPaperOrder(
   input: unknown,
   riskProfile: RiskProfile,
   riskSettings: RiskSettings,
-  options: { buyingPower?: number | null; alpacaPaperOnly?: boolean; now?: Date } = {}
+  options: {
+    buyingPower?: number | null;
+    alpacaPaperOnly?: boolean;
+    now?: Date;
+    openPaperPositionCount?: number;
+    existingOptionsContracts?: number;
+    existingUnderlyingRequiredCapital?: number;
+  } = {}
 ): MultiLegPaperOrderValidationResult {
   const parsed = multiLegPaperOrderSchema.safeParse(input);
   if (!parsed.success) {
@@ -220,6 +227,11 @@ export function validateMultiLegPaperOrder(
   const maxRisk = riskProfile.accountEquity * riskProfile.maxRiskPerTradePct;
   const maxStrategyExposure = riskProfile.accountEquity * (riskSettings.maxStrategyExposurePct ?? riskProfile.maxPositionPct);
   const maxContracts = riskSettings.maxOptionsContracts ?? 4;
+  const maxOpenPositions = riskSettings.maxOpenPositions ?? 12;
+  const openPaperPositionCount = Math.max(0, options.openPaperPositionCount ?? 0);
+  const existingOptionsContracts = Math.max(0, options.existingOptionsContracts ?? 0);
+  const existingUnderlyingRequiredCapital = Math.max(0, options.existingUnderlyingRequiredCapital ?? 0);
+  const totalContracts = getTotalContracts(order);
 
   if (riskSettings.killSwitchEnabled) errors.push("Paper order entry is disabled because the kill switch is enabled.");
   if (options.alpacaPaperOnly === false) errors.push("Live Alpaca endpoints are blocked. Use the paper endpoint before paper options simulation.");
@@ -234,8 +246,17 @@ export function validateMultiLegPaperOrder(
   if (!isAllowedOptionsExpression(order.expressionType)) errors.push("This expression type is not enabled for options paper simulation.");
   if (order.maxLoss > maxRisk) errors.push(`Estimated max loss exceeds max per-trade risk of ${round(maxRisk, 2)}.`);
   if (order.requiredCapital > maxStrategyExposure) errors.push(`Required capital exceeds strategy exposure cap of ${round(maxStrategyExposure, 2)}.`);
+  if (existingUnderlyingRequiredCapital + order.requiredCapital > maxStrategyExposure) {
+    errors.push(`Open ${order.underlyingSymbol} options exposure plus this order exceeds strategy exposure cap of ${round(maxStrategyExposure, 2)}.`);
+  }
   if (order.requiredCapital > buyingPower) errors.push("Required capital exceeds available paper buying power.");
-  if (getTotalContracts(order) > maxContracts) errors.push(`Order exceeds max options contract limit of ${maxContracts}.`);
+  if (totalContracts > maxContracts) errors.push(`Order exceeds max options contract limit of ${maxContracts}.`);
+  if (existingOptionsContracts + totalContracts > maxContracts) {
+    errors.push(`Open options simulations plus this order exceed max options contract limit of ${maxContracts}.`);
+  }
+  if (openPaperPositionCount + 1 > maxOpenPositions) {
+    errors.push(`Open paper positions plus this order exceed max open positions limit of ${maxOpenPositions}.`);
+  }
   if (!hasDefinedRisk(order)) errors.push("Undefined-risk or naked options structures are blocked.");
 
   for (const leg of order.legs) {

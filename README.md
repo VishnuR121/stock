@@ -30,6 +30,7 @@ This is an educational research and paper-trading tool. It is not financial advi
 - Paper mode is the only execution mode.
 - Paper orders require stop loss, take profit, paper-only confirmation, risk acceptance, and earnings/event confirmation.
 - Options paper simulations require paper-only confirmation, risk acceptance, event check, max-loss acknowledgement, internal-simulation acknowledgement, no-live-endpoint acknowledgement, liquidity checks, and contract data.
+- Options simulation creation checks open paper journal exposure, max open positions, max options contracts, and same-underlying strategy exposure before a new simulation is created.
 - Closing an options simulation updates only the internal paper journal. It does not submit broker options orders.
 - The kill switch blocks paper order submission while enabled.
 - AI explains structured quantitative inputs and deterministic expression output; it must not invent option contracts, invent prices, override max loss, hide warnings, override the kill switch, recommend live trading, or submit orders.

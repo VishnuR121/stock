@@ -764,7 +764,11 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
       return;
     }
 
-    const [account, positionsResponse] = await Promise.all([alpaca.getAccount(), safePositions(alpaca)]);
+    const [account, positionsResponse, journal] = await Promise.all([
+      alpaca.getAccount(),
+      safePositions(alpaca),
+      store.getJournal()
+    ]);
     const riskProfile = getRiskProfile(account.equity ?? 100000, riskSettings);
     if (parsed.data.expressionType === "covered_call" && getHeldLongShares(positionsResponse.positions, parsed.data.underlyingSymbol) < 100) {
       response.status(400).json({
@@ -794,7 +798,8 @@ export function createApp(overrides: Partial<AppConfig> = {}) {
     }
     const validation = validateMultiLegPaperOrder(parsed.data, riskProfile, riskSettings, {
       buyingPower: account.buyingPower ?? account.cash ?? account.equity,
-      alpacaPaperOnly
+      alpacaPaperOnly,
+      ...getOpenPaperOptionsExposure(journal, parsed.data.underlyingSymbol)
     });
     if (!knownContracts.length) {
       validation.warnings.push("Provider contract validation was unavailable; verify the contracts manually before relying on the simulation.");
@@ -1178,6 +1183,21 @@ function getHeldLongShares(positions: unknown[], symbol: string): number {
     const qty = Number((position as { qty?: unknown; quantity?: unknown }).qty ?? (position as { quantity?: unknown }).quantity ?? 0);
     return Number.isFinite(qty) && qty > 0 ? sum + qty : sum;
   }, 0);
+}
+
+function getOpenPaperOptionsExposure(journal: TradeJournalEntry[], underlyingSymbol: string) {
+  const normalizedUnderlying = normalizeSymbol(underlyingSymbol);
+  const openEntries = journal.filter((entry) => entry.status === "paper_open");
+  const openOptionsEntries = openEntries.filter((entry) => entry.paperExecutionMode === "internal_simulation" && entry.optionLegs?.length);
+  return {
+    openPaperPositionCount: openEntries.length,
+    existingOptionsContracts: openOptionsEntries.reduce((sum, entry) => (
+      sum + (entry.optionLegs ?? []).reduce((contractSum, leg) => contractSum + leg.quantity, 0)
+    ), 0),
+    existingUnderlyingRequiredCapital: openOptionsEntries
+      .filter((entry) => normalizeSymbol(entry.underlyingSymbol ?? entry.symbol) === normalizedUnderlying)
+      .reduce((sum, entry) => sum + (entry.requiredCapital ?? 0), 0)
+  };
 }
 
 async function getMarketSnapshots(alpaca: AlpacaClient, store: AppStore): Promise<SignalSnapshot[]> {

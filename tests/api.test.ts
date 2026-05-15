@@ -461,6 +461,112 @@ describe("API safety behavior", () => {
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/v2/orders"), expect.objectContaining({ method: "POST" }));
   });
 
+  it("blocks a new options simulation when open simulated contracts exceed the risk cap", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes("/v2/account")) {
+        return jsonResponse({
+          equity: "100000",
+          buying_power: "100000",
+          cash: "100000",
+          paper: true
+        });
+      }
+      if (target.includes("/v2/positions")) return jsonResponse([]);
+      if (target.includes("/v2/orders")) return jsonResponse([]);
+      if (target.includes("/v2/options/contracts")) {
+        return jsonResponse({
+          option_contracts: [{
+            symbol: "AAPL260619C00145000",
+            underlying_symbol: "AAPL",
+            type: "call",
+            expiration_date: "2026-06-19",
+            strike_price: "145",
+            close_price: "4.5",
+            bid_price: "4.4",
+            ask_price: "4.6",
+            open_interest: "250",
+            volume: "100"
+          }]
+        });
+      }
+      if (target.includes("/v2/stocks/AAPL/bars")) {
+        return jsonResponse({ bars: [{ t: "2026-05-14T00:00:00Z", o: 140, h: 142, l: 139, c: 140, v: 1000 }] });
+      }
+      return jsonResponse({});
+    });
+
+    const app = createApp({
+      alpacaKeyId: "key",
+      alpacaSecretKey: "secret",
+      databaseUrl: undefined,
+      dataFilePath: `data/test-options-open-cap-${Date.now()}.json`
+    });
+
+    await request(app)
+      .post("/api/journal")
+      .send({
+        symbol: "AAPL",
+        status: "paper_open",
+        action: "paper_options_candidate",
+        notes: "Existing options simulation.",
+        expressionType: "long_call",
+        underlyingSymbol: "AAPL",
+        assetClass: "option",
+        paperExecutionMode: "internal_simulation",
+        requiredCapital: 1800,
+        optionLegs: [{
+          optionSymbol: "AAPL260619C00145000",
+          underlyingSymbol: "AAPL",
+          optionType: "call",
+          side: "buy",
+          quantity: 4,
+          strike: 145,
+          expiration: "2026-06-19",
+          estimatedMid: 4.5,
+          openInterest: 250,
+          volume: 100
+        }]
+      })
+      .expect(200);
+
+    const response = await request(app)
+      .post("/api/paper/multi-leg-orders")
+      .send({
+        expressionType: "long_call",
+        underlyingSymbol: "AAPL",
+        legs: [{
+          optionSymbol: "AAPL260619C00145000",
+          underlyingSymbol: "AAPL",
+          optionType: "call",
+          side: "buy",
+          quantity: 1,
+          strike: 145,
+          expiration: "2026-06-19",
+          estimatedMid: 4.5,
+          bid: 4.4,
+          ask: 4.6,
+          openInterest: 250,
+          volume: 100
+        }],
+        estimatedDebit: 450,
+        maxLoss: 450,
+        breakeven: 149.5,
+        requiredCapital: 450,
+        paperExecutionMode: "internal_simulation",
+        timeHorizon: "30-60 DTE swing options",
+        earningsChecked: true,
+        confirmedPaperOnly: true,
+        acceptedRisk: true,
+        maxLossAcknowledged: true,
+        paperSimulationAcknowledged: true,
+        noLiveEndpointAcknowledged: true
+      })
+      .expect(400);
+
+    expect(response.body.errors.join(" ")).toMatch(/Open options simulations plus this order exceed max options contract limit/i);
+  });
+
   it("closes a single paper position after explicit confirmation", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
       const target = String(url);
